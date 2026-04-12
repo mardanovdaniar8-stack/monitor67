@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация · Монитор67</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/tracker.css">
+    <style>
+        body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .register-card { max-width: 500px; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="card register-card">
+        {% if created %}
+            <h2 style="text-align:center; color: #28a745;">Организация создана!</h2>
+            <p style="text-align:center; margin: 20px 0;">Название: <strong>{{ org_name }}</strong></p>
+            <p style="text-align:center; font-size: 18px;">Ваш ID организации: <strong style="font-size: 24px; color: var(--accent);">{{ org_id }}</strong></p>
+            <p style="text-align:center; margin-top: 20px;">Запомните его для входа.</p>
+            <div style="margin-top: 30px;">
+                <a href="/login" class="btn btn-primary" style="width:100%;">Перейти ко входу</a>
+            </div>
+        {% else %}
+            <h2 style="text-align:center;">Создание организации</h2>
+            <p class="text-secondary" style="text-align:center; margin-bottom:24px;">Зарегистрируйте новую компанию</p>
+            <form method="POST">
+                <div class="input-group">
+                    <label>Название организации</label>
+                    <input type="text" name="org_name" placeholder="Например, ООО «Ромашка»" required>
+                </div>
+                <hr style="margin:24px 0; border:0; border-top:1px solid var(--border-light);">
+                <h3 style="margin-bottom:16px;">Администратор</h3>
+                <div class="input-group">
+                    <label>Имя</label>
+                    <input type="text" name="first_name" placeholder="Иван" required>
+                </div>
+                <div class="input-group">
+                    <label>Фамилия</label>
+                    <input type="text" name="last_name" placeholder="Иванов" required>
+                </div>
+                <div class="input-group">
+                    <label>Логин</label>
+                    <input type="text" name="login" placeholder="admin" required>
+                </div>
+                <div class="input-group">
+                    <label>Пароль</label>
+                    <input type="password" name="password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Создать</button>
+            </form>
+            <div style="margin-top: 16px; text-align: center;">
+                <a href="/login">← Вернуться ко входу</a>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

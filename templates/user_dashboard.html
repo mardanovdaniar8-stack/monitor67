@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет · Монитор67</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/tracker.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .welcome-card { display: flex; justify-content: space-between; align-items: center; }
+        .rate-badge { background: #e8f2ff; color: var(--accent); padding: 8px 18px; border-radius: 30px; font-weight: 600; }
+        .task-item { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--border-light); }
+        .task-done { background: #e8f8e8; opacity: 0.8; }
+        .urgent { border-left: 4px solid var(--urgent-border); padding-left: 16px; background: var(--urgent-bg); border-radius: 0 8px 8px 0; }
+        .btn-sm { padding: 8px 18px; font-size: 0.9rem; }
+        .stats-controls { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .manual-badge { background: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card welcome-card">
+            <div>
+                <h1>Привет, {{ user.first_name }}!</h1>
+                <p class="text-secondary">{{ org.name }}</p>
+            </div>
+            <div class="rate-badge">{{ user.hourly_rate }} ₽/час</div>
+        </div>
+
+        <div class="card">
+            <h3>Статистика</h3>
+            <div class="stats-controls">
+                <select id="periodSelect" class="search-input" style="width:auto;">
+                    <option value="week">Неделя</option>
+                    <option value="month">Месяц</option>
+                    <option value="year">Год</option>
+                </select>
+                <input type="date" id="datePicker" class="search-input" style="width:auto;">
+                <button class="btn" onclick="fetchDayStats()">Показать день</button>
+                <span id="dayStats" style="margin-left: auto;"></span>
+            </div>
+            <div style="height:250px;"><canvas id="statsChart"></canvas></div>
+            <div id="statsInfo" style="margin-top:16px; text-align:center;"></div>
+        </div>
+
+        <div class="card">
+            <h3>Текущие задачи</h3>
+            {% set active_tasks = user.tasks | selectattr('is_done', 'equalto', false) | list %}
+            {% if active_tasks %}
+                {% for task in active_tasks %}
+                {% set days_left = (task.deadline - today).days %}
+                {% set total = task.users|length %}
+                {% set completed = task.completions | selectattr('completed') | list | length %}
+                <div class="task-item {{ 'urgent' if days_left <= 2 else '' }}">
+                    <div>
+                        <div style="font-weight:600;">{{ task.title }}</div>
+                        <div style="color: var(--text-secondary);">Дедлайн: {{ task.deadline.strftime('%d.%m.%Y') }}</div>
+                        <div>Прогресс: {{ completed }}/{{ total }}</div>
+                    </div>
+                    {% set my_completion = task.completions | selectattr('user_id', 'equalto', user.id) | first %}
+                    {% if not my_completion or not my_completion.completed %}
+                    <a href="/task/done/{{ task.id }}" class="btn btn-sm">Отметить</a>
+                    {% else %}
+                    <span style="color:#28a745;">Выполнено вами</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>Нет активных задач</p>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h3>Завершённые задачи</h3>
+            {% set done_tasks = user.tasks | selectattr('is_done', 'equalto', true) | list %}
+            {% if done_tasks %}
+                {% for task in done_tasks %}
+                <div class="task-item task-done">
+                    <div>
+                        <div style="font-weight:600; text-decoration: line-through;">{{ task.title }}</div>
+                        <div style="color: var(--text-secondary);">Дедлайн: {{ task.deadline.strftime('%d.%m.%Y') }}</div>
+                    </div>
+                    <span style="color:#28a745;">✓ Завершено</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>Нет завершённых задач</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        let chart;
+        function updateStats() {
+            const period = document.getElementById('periodSelect').value;
+            fetch(`/api/stats?period=${period}`).then(r=>r.json()).then(data => {
+                const ctx = document.getElementById('statsChart').getContext('2d');
+                if (chart) chart.destroy();
+                chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'Часы',
+                            data: data.values,
+                            backgroundColor: '#007aff'
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                document.getElementById('statsInfo').innerHTML = `Всего за период: ${data.total_hours} ч | Заработано: ${data.earnings} ₽`;
+            });
+        }
+        function fetchDayStats() {
+            const date = document.getElementById('datePicker').value;
+            if (!date) return;
+            fetch(`/api/stats?date=${date}`).then(r=>r.json()).then(data => {
+                document.getElementById('dayStats').innerText = `${data.date}: ${data.hours} ч, ${data.earnings} ₽`;
+            });
+        }
+        document.getElementById('periodSelect').addEventListener('change', updateStats);
+        updateStats();
+    </script>
+</body>
+</html>

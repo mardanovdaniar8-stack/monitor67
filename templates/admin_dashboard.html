@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ‑панель · Монитор67</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/tracker.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .employee-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .employee-card { background: white; border-radius: 16px; padding: 20px; border: 1px solid var(--border-light); }
+        .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; opacity: 0; transition: 0.2s; }
+        .modal.active { visibility: visible; opacity: 1; }
+        .modal-content { background: white; padding: 30px; border-radius: 24px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+        .action-icons { display: flex; gap: 8px; }
+        .action-icons button { background: none; border: none; cursor: pointer; padding: 6px; border-radius: 8px; }
+        .action-icons button:hover { background: #e5e5ea; }
+        .action-icons img { width: 20px; height: 20px; }
+        .table-wrapper { max-height: 500px; overflow-y: auto; border-radius: 12px; border: 1px solid var(--border-light); background: white; }
+        .search-input { padding: 12px 16px; border: 1px solid var(--border-light); border-radius: 30px; width: 250px; }
+        .checkbox-list { max-height: 150px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 12px; padding: 10px; }
+        .stats-controls { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .manual-badge { background: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
+        .session-row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; }
+        .session-row button { margin-left: auto; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <h1>{{ org.name }} · Панель управления</h1>
+        <div style="display: flex; gap: 16px; align-items: center;">
+            <div>
+                <span>Код приглашения: </span>
+                <span id="inviteCodeDisplay">
+                    {% if org.invite_code and org.invite_code_expires > now %}
+                        <strong>{{ org.invite_code }}</strong> (до <span id="inviteExpires">{{ org.invite_code_expires.strftime('%H:%M') }}</span>)
+                    {% else %}
+                        <span style="color: var(--urgent-text);">не активен</span>
+                    {% endif %}
+                </span>
+                <button class="btn-outline btn-sm" style="padding:6px 12px;" id="generateInviteBtn">Сгенерировать</button>
+            </div>
+            <a href="/login" class="btn btn-outline"><img src="/static/icons/logout.png" alt=""> Выйти</a>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="stats"><img src="/static/icons/stats.png" alt=""> Статистика</button>
+        <button class="tab-btn" data-tab="employees"><img src="/static/icons/user.png" alt=""> Сотрудники</button>
+        <button class="tab-btn" data-tab="tasks"><img src="/static/icons/task.png" alt=""> Задачи</button>
+        <button class="tab-btn" data-tab="org"><img src="/static/icons/edit.png" alt=""> Организация</button>
+    </div>
+
+    <!-- Статистика -->
+    <div id="tab-stats" class="tab-content active">
+        <div class="stats-controls">
+            <select id="statsPeriod" class="search-input" style="width:auto;">
+                <option value="week">Неделя</option>
+                <option value="month">Месяц</option>
+                <option value="year">Год</option>
+            </select>
+            <input type="month" id="reportMonth" class="search-input" style="width:auto;">
+            <button class="btn" id="downloadReportBtn">Скачать сводку за месяц</button>
+        </div>
+        <div class="employee-grid" id="statsGrid"></div>
+    </div>
+
+    <!-- Сотрудники -->
+    <div id="tab-employees" class="tab-content">
+        <div style="display:flex; justify-content: space-between; margin-bottom:16px;">
+            <input type="text" id="employeeSearch" placeholder="Поиск сотрудников..." class="search-input">
+            <button class="btn" onclick="openAddUserModal()"><img src="/static/icons/plus.png" alt=""> Добавить</button>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="employeesTable">
+                <thead><tr><th>Имя</th><th>Логин</th><th>Ставка (₽/ч)</th><th>Часы</th><th>Действия</th></tr></thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.first_name }} {{ u.last_name }}</td>
+                        <td>{{ u.login }}</td>
+                        <td>{{ u.hourly_rate }}</td>
+                        <td>{{ (u.sessions | sum(attribute='duration_minutes') / 60) | round(1) }}</td>
+                        <td class="action-icons">
+                            <button onclick="openEditUserModal({{ u.id }}, '{{ u.first_name }}', '{{ u.last_name }}', '{{ u.login }}', '{{ u.hourly_rate }}')" title="Редактировать"><img src="/static/icons/edit.png" alt="Ред"></button>
+                            <form action="/admin/delete_user/{{ u.id }}" method="POST" onsubmit="return confirm('Удалить сотрудника?');" style="display:inline;"><button type="submit" title="Удалить"><img src="/static/icons/delete.png" alt="Уд"></button></form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Задачи -->
+    <div id="tab-tasks" class="tab-content">
+        <div style="display:flex; justify-content: space-between; margin-bottom:16px;">
+            <input type="text" id="taskSearch" placeholder="Поиск задач..." class="search-input">
+            <button class="btn" onclick="openAddTaskModal()"><img src="/static/icons/plus.png" alt=""> Создать</button>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="tasksTable">
+                <thead><tr><th>Задача</th><th>Дедлайн</th><th>Исполнители</th><th>Прогресс</th><th>Действия</th></tr></thead>
+                <tbody>
+                    {% for t in tasks %}
+                    {% set total = t.users|length %}
+                    {% set completed = t.completions | selectattr('completed') | list | length %}
+                    <tr>
+                        <td>{{ t.title }}</td>
+                        <td>{{ t.deadline }}</td>
+                        <td>{% for u in t.users %}{{ u.first_name }} {{ u.last_name }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+                        <td>{{ completed }}/{{ total }}</td>
+                        <td class="action-icons">
+                            <button onclick="openEditTaskModal({{ t.id }}, '{{ t.title }}', '{{ t.deadline }}', {{ t.users | map(attribute='id') | list }})" title="Редактировать"><img src="/static/icons/edit.png"></button>
+                            <form action="/admin/delete_task/{{ t.id }}" method="POST" onsubmit="return confirm('Удалить задачу?');" style="display:inline;"><button type="submit" title="Удалить"><img src="/static/icons/delete.png"></button></form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Организация -->
+    <div id="tab-org" class="tab-content">
+        <div class="card">
+            <h3>Редактирование организации</h3>
+            <form action="/admin/update_org" method="POST">
+                <div class="input-group">
+                    <label>Название организации</label>
+                    <input type="text" name="name" value="{{ org.name }}" required>
+                </div>
+                <div class="input-group">
+                    <label>Новый пароль администратора (оставьте пустым, чтобы не менять)</label>
+                    <input type="password" name="password" placeholder="Новый пароль">
+                </div>
+                <button type="submit" class="btn">Сохранить</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно добавления сотрудника -->
+<div id="addUserModal" class="modal">
+    <div class="modal-content">
+        <h2>Новый сотрудник</h2>
+        <form action="/admin/add_user" method="POST">
+            <div class="input-group"><input name="f_name" placeholder="Имя" required></div>
+            <div class="input-group"><input name="l_name" placeholder="Фамилия" required></div>
+            <div class="input-group"><input name="login" placeholder="Логин" required></div>
+            <div class="input-group"><input name="password" type="password" placeholder="Пароль" required></div>
+            <div class="input-group"><input name="rate" type="number" step="0.1" placeholder="Ставка ₽/час" required></div>
+            <button type="submit" class="btn">Добавить</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('addUserModal')">Отмена</button>
+        </form>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования сотрудника -->
+<div id="editUserModal" class="modal">
+    <div class="modal-content">
+        <h2>Редактировать сотрудника</h2>
+        <form id="editUserForm" method="POST">
+            <div class="input-group"><input name="f_name" id="editFName" placeholder="Имя" required></div>
+            <div class="input-group"><input name="l_name" id="editLName" placeholder="Фамилия" required></div>
+            <div class="input-group"><input name="login" id="editLogin" placeholder="Логин" required></div>
+            <div class="input-group"><input name="password" type="password" placeholder="Новый пароль (оставьте пустым, чтобы не менять)"></div>
+            <div class="input-group"><input name="rate" id="editRate" type="number" step="0.1" placeholder="Ставка ₽/час" required></div>
+            <button type="submit" class="btn">Сохранить</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('editUserModal')">Отмена</button>
+        </form>
+    </div>
+</div>
+
+<!-- Модальное окно добавления задачи -->
+<div id="addTaskModal" class="modal">
+    <div class="modal-content">
+        <h2>Новая задача</h2>
+        <form action="/admin/add_task" method="POST">
+            <div class="input-group"><input name="title" placeholder="Название" required></div>
+            <div class="input-group"><input name="deadline" type="date" required></div>
+            <div class="input-group">
+                <label>Исполнители</label>
+                <div class="checkbox-list">
+                    {% for u in users %}
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
+                        <input type="checkbox" name="user_ids" value="{{ u.id }}" style="width: 18px; height: 18px; margin: 0;">
+                        {{ u.first_name }} {{ u.last_name }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <button type="submit" class="btn">Создать</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('addTaskModal')">Отмена</button>
+        </form>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования задачи -->
+<div id="editTaskModal" class="modal">
+    <div class="modal-content">
+        <h2>Редактировать задачу</h2>
+        <form id="editTaskForm" method="POST">
+            <div class="input-group"><input name="title" id="editTaskTitle" placeholder="Название" required></div>
+            <div class="input-group"><input name="deadline" id="editTaskDeadline" type="date" required></div>
+            <div class="input-group">
+                <label>Исполнители</label>
+                <div class="checkbox-list" id="editTaskUsers">
+                    {% for u in users %}
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
+                        <input type="checkbox" name="user_ids" value="{{ u.id }}" style="width: 18px; height: 18px; margin: 0;">
+                        {{ u.first_name }} {{ u.last_name }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <button type="submit" class="btn">Сохранить</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('editTaskModal')">Отмена</button>
+        </form>
+    </div>
+</div>
+
+<!-- Модальное окно истории сессий -->
+<div id="sessionsModal" class="modal">
+    <div class="modal-content">
+        <h2>История сессий</h2>
+        <div id="sessionsList" style="max-height: 300px; overflow-y: auto;"></div>
+        <button class="btn btn-outline" onclick="closeModal('sessionsModal')">Закрыть</button>
+    </div>
+</div>
+
+<script>
+    // Генерация инвайта AJAX
+    document.getElementById('generateInviteBtn').addEventListener('click', async () => {
+        const resp = await fetch('/admin/generate_invite', {method: 'POST'});
+        const data = await resp.json();
+        document.getElementById('inviteCodeDisplay').innerHTML = `<strong>${data.invite_code}</strong> (до ${data.expires})`;
+    });
+
+    // Вкладки
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+            if (btn.dataset.tab === 'stats') loadAllStats();
+        });
+    });
+
+    // Модалки
+    function openAddUserModal() { document.getElementById('addUserModal').classList.add('active'); }
+    function openAddTaskModal() { document.getElementById('addTaskModal').classList.add('active'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+    function openEditUserModal(id, fname, lname, login, rate) {
+        document.getElementById('editUserForm').action = '/admin/edit_user/' + id;
+        document.getElementById('editFName').value = fname;
+        document.getElementById('editLName').value = lname;
+        document.getElementById('editLogin').value = login;
+        document.getElementById('editRate').value = rate;
+        document.getElementById('editUserModal').classList.add('active');
+    }
+
+    function openEditTaskModal(id, title, deadline, userIds) {
+        document.getElementById('editTaskForm').action = '/admin/edit_task/' + id;
+        document.getElementById('editTaskTitle').value = title;
+        document.getElementById('editTaskDeadline').value = deadline;
+        document.querySelectorAll('#editTaskUsers input[type=checkbox]').forEach(cb => cb.checked = false);
+        userIds.forEach(uid => {
+            const cb = document.querySelector(`#editTaskUsers input[value="${uid}"]`);
+            if (cb) cb.checked = true;
+        });
+        document.getElementById('editTaskModal').classList.add('active');
+    }
+
+    // Сессии
+    async function openSessionsModal(uid) {
+        const resp = await fetch(`/api/admin/user_sessions/${uid}`);
+        const sessions = await resp.json();
+        const list = document.getElementById('sessionsList');
+        list.innerHTML = '';
+        sessions.forEach(s => {
+            const div = document.createElement('div');
+            div.className = 'session-row';
+            div.innerHTML = `<span>${s.date}: ${Math.floor(s.minutes/60)}ч ${s.minutes%60}м</span>
+                            ${s.manual ? '<span class="manual-badge">добавлено</span>' : ''}
+                            ${s.manual ? `<button onclick="deleteAdjustment(${s.id})">Удалить</button>` : ''}`;
+            list.appendChild(div);
+        });
+        document.getElementById('sessionsModal').classList.add('active');
+    }
+
+    async function deleteAdjustment(sid) {
+        await fetch(`/api/admin/delete_adjustment/${sid}`, {method: 'DELETE'});
+        closeModal('sessionsModal');
+    }
+
+    // Статистика
+    async function loadAllStats() {
+        const period = document.getElementById('statsPeriod').value;
+        const resp = await fetch(`/api/admin/all_stats?period=${period}`);
+        const data = await resp.json();
+        const grid = document.getElementById('statsGrid');
+        grid.innerHTML = '';
+        data.forEach(u => {
+            const card = document.createElement('div');
+            card.className = 'employee-card';
+            card.innerHTML = `<h3>${u.name}</h3><div style="height:180px;"><canvas id="chart-${u.id}"></canvas></div>
+                              <div>Часов: ${u.total_hours} | Заработано: ${u.earnings} ₽</div>`;
+            grid.appendChild(card);
+            new Chart(document.getElementById(`chart-${u.id}`), {
+                type: 'bar',
+                data: { labels: u.labels, datasets: [{ label: 'Часы', data: u.values, backgroundColor: '#007aff' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        });
+    }
+
+    // Скачивание отчёта
+    document.getElementById('downloadReportBtn').addEventListener('click', () => {
+        const monthInput = document.getElementById('reportMonth').value;
+        if (!monthInput) {
+            alert('Выберите месяц');
+            return;
+        }
+        window.location.href = `/api/admin/monthly_report?month=${monthInput}`;
+    });
+
+    document.getElementById('statsPeriod').addEventListener('change', loadAllStats);
+    loadAllStats();
+
+    // Поиск по таблицам
+    document.getElementById('employeeSearch').addEventListener('input', e => {
+        const f = e.target.value.toLowerCase();
+        document.querySelectorAll('#employeesTable tbody tr').forEach(r => r.style.display = r.textContent.toLowerCase().includes(f) ? '' : 'none');
+    });
+    document.getElementById('taskSearch').addEventListener('input', e => {
+        const f = e.target.value.toLowerCase();
+        document.querySelectorAll('#tasksTable tbody tr').forEach(r => r.style.display = r.textContent.toLowerCase().includes(f) ? '' : 'none');
+    });
+</script>
+</body>
+</html>
