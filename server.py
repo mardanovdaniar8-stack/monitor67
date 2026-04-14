@@ -1,6 +1,7 @@
 import os
 import secrets
 from datetime import datetime, date, timedelta
+from calendar import monthrange
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from io import BytesIO
@@ -69,11 +70,156 @@ def get_current_organization():
         return Organization.query.get(session['org_id'])
     return None
 
+def get_period_bounds(period, custom_start=None, custom_end=None):
+    today = date.today()
+    if period == 'week':
+        start = today - timedelta(days=today.weekday())
+        end = today
+    elif period == 'month':
+        start = today.replace(day=1)
+        end = today
+    elif period == 'quarter':
+        q_start_month = ((today.month - 1) // 3) * 3 + 1
+        start = today.replace(month=q_start_month, day=1)
+        end = today
+    elif period == 'year':
+        start = today.replace(month=1, day=1)
+        end = today
+    elif period == 'alltime':
+        start = date(2020, 1, 1)
+        end = today
+    elif period == 'custom' and custom_start and custom_end:
+        try:
+            start = datetime.strptime(custom_start, '%Y-%m-%d').date()
+            end = datetime.strptime(custom_end, '%Y-%m-%d').date()
+        except:
+            start = today.replace(day=1)
+            end = today
+    else:
+        start = today - timedelta(days=30)
+        end = today
+    return start, end
+
+def seed_test_db():
+    existing = Organization.query.filter_by(name='Ромашка').first()
+    if existing:
+        return existing
+
+    import random
+    org = Organization(name='Ромашка')
+    db.session.add(org)
+    db.session.flush()
+
+    admin = User(
+        first_name='Директор',
+        last_name='Иванов',
+        login='admin',
+        password='admin123',
+        hourly_rate=0,
+        role='admin',
+        organization_id=org.id
+    )
+    db.session.add(admin)
+    db.session.flush()
+
+    employees_data = [
+        ('Александр', 'Петров',   'petrov',    'pass1', 350.0),
+        ('Мария',     'Сидорова',  'sidorova',  'pass2', 420.0),
+        ('Дмитрий',  'Козлов',    'kozlov',    'pass3', 280.0),
+        ('Елена',    'Новикова',   'novikova',  'pass4', 510.0),
+        ('Иван',     'Морозов',    'morozov',   'pass5', 390.0),
+        ('Анна',     'Волкова',    'volkova',   'pass6', 460.0),
+        ('Сергей',   'Зайцев',     'zaitsev',   'pass7', 320.0),
+        ('Ольга',    'Лебедева',   'lebedeva',  'pass8', 575.0),
+        ('Алексей',  'Семёнов',    'semenov',   'pass9', 245.0),
+        ('Наталья',  'Орлова',     'orlova',    'pass10', 620.0),
+    ]
+
+    employees = []
+    for fn, ln, login, pw, rate in employees_data:
+        u = User(
+            first_name=fn,
+            last_name=ln,
+            login=login,
+            password=pw,
+            hourly_rate=rate,
+            role='user',
+            organization_id=org.id
+        )
+        db.session.add(u)
+        employees.append(u)
+    db.session.flush()
+
+    today = date.today()
+    start_date = today - timedelta(days=270)
+
+    for emp in employees:
+        current = start_date
+        while current <= today:
+            if current.weekday() < 5:
+                variance = random.randint(-30, 30)
+                minutes = max(300, 480 + variance)
+                if random.random() < 0.1:
+                    minutes = random.randint(60, 240)
+                ws = WorkSession(
+                    user_id=emp.id,
+                    date=current,
+                    duration_minutes=minutes
+                )
+                db.session.add(ws)
+            current += timedelta(days=1)
+
+    tasks_done = [
+        ('Разработка модуля авторизации',    date(2025, 11, 15)),
+        ('Вёрстка главной страницы',         date(2025, 12, 1)),
+        ('Тестирование API',                 date(2026, 1, 10)),
+        ('Написание документации',           date(2026, 2, 5)),
+        ('Оптимизация базы данных',          date(2026, 3, 20)),
+    ]
+    tasks_active = [
+        ('Разработка мобильного приложения', today + timedelta(days=30)),
+        ('Миграция на новый сервер',         today + timedelta(days=14)),
+        ('Рефакторинг кода',                 today + timedelta(days=7)),
+        ('Интеграция с CRM',                 today + timedelta(days=45)),
+        ('Обучение новых сотрудников',       today + timedelta(days=60)),
+    ]
+
+    for title, deadline in tasks_done:
+        t = Task(title=title, deadline=deadline, is_done=True, organization_id=org.id)
+        db.session.add(t)
+        db.session.flush()
+        for emp in employees:
+            t.users.append(emp)
+            tc = TaskCompletion(task_id=t.id, user_id=emp.id, completed=True)
+            db.session.add(tc)
+
+    for title, deadline in tasks_active:
+        t = Task(title=title, deadline=deadline, is_done=False, organization_id=org.id)
+        db.session.add(t)
+        db.session.flush()
+        for emp in employees:
+            t.users.append(emp)
+            tc = TaskCompletion(task_id=t.id, user_id=emp.id, completed=False)
+            db.session.add(tc)
+
+    db.session.commit()
+    return org
+
 # ---------- Регистрация ----------
 @app.route('/register', methods=['GET', 'POST'])
 def register_org():
     if request.method == 'POST':
-        org = Organization(name=request.form['org_name'])
+        org_name = request.form['org_name']
+
+        if org_name.strip().lower() == 'test_db':
+            org = seed_test_db()
+            admin = User.query.filter_by(organization_id=org.id, role='admin').first()
+            session['user_id'] = admin.id
+            session['org_id'] = org.id
+            return render_template('register.html', created=True, org_id=org.id, org_name=org.name,
+                                   test_mode=True, admin_login=admin.login, admin_password=admin.password)
+
+        org = Organization(name=org_name)
         db.session.add(org)
         db.session.flush()
         admin = User(
@@ -117,7 +263,8 @@ def dashboard():
     org = Organization.query.get(session['org_id'])
     if user.role == 'admin':
         return redirect(url_for('admin_panel'))
-    return render_template('user_dashboard.html', user=user, org=org)
+    today = date.today()
+    return render_template('user_dashboard.html', user=user, org=org, today=today)
 
 @app.route('/admin')
 def admin_panel():
@@ -132,6 +279,20 @@ def admin_panel():
     now = datetime.utcnow()
     error = request.args.get('error')
     return render_template('admin_dashboard.html', org=org, users=users, tasks=tasks, now=now, error=error)
+
+@app.route('/admin/view_user/<int:uid>')
+def admin_view_user(uid):
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+    admin = User.query.get(session['user_id'])
+    if admin.role != 'admin':
+        return redirect(url_for('dashboard'))
+    org = Organization.query.get(session['org_id'])
+    user = User.query.get_or_404(uid)
+    if user.organization_id != org.id:
+        return "Forbidden", 403
+    today = date.today()
+    return render_template('user_dashboard.html', user=user, org=org, today=today, admin_view=True, admin_id=admin.id)
 
 @app.route('/admin/update_org', methods=['POST'])
 def update_org():
@@ -198,6 +359,9 @@ def delete_user(uid):
     if u.organization_id != org.id:
         return "Forbidden", 403
     WorkSession.query.filter_by(user_id=uid).delete()
+    TaskCompletion.query.filter_by(user_id=uid).delete()
+    for t in u.tasks:
+        t.users.remove(u)
     db.session.delete(u)
     db.session.commit()
     return redirect(url_for('admin_panel'))
@@ -273,7 +437,7 @@ def mark_done_web(tid):
     if tc:
         tc.completed = True
         db.session.commit()
-        total = task.users.count()
+        total = len(task.users)
         completed_count = TaskCompletion.query.filter_by(task_id=tid, completed=True).count()
         if completed_count == total:
             task.is_done = True
@@ -289,17 +453,35 @@ def generate_invite():
     org.invite_code = generate_invite_code()
     org.invite_code_expires = datetime.utcnow() + timedelta(minutes=15)
     db.session.commit()
-    return jsonify({"invite_code": org.invite_code, "expires": org.invite_code_expires.strftime('%H:%M')})
+    import time
+    expires_ts = int(org.invite_code_expires.timestamp() * 1000)
+    return jsonify({
+        "invite_code": org.invite_code,
+        "expires": org.invite_code_expires.strftime('%H:%M'),
+        "expires_ts": expires_ts
+    })
 
 # ---------- API Статистика ----------
 @app.route('/api/stats')
 def get_stats():
     if 'user_id' not in session:
         return jsonify({"error": "unauthorized"}), 401
-    user = User.query.get(session['user_id'])
+    requesting_user = User.query.get(session['user_id'])
+    target_uid = request.args.get('target_uid')
+    if target_uid and requesting_user.role == 'admin':
+        org = get_current_organization()
+        user = User.query.get(int(target_uid))
+        if not user or user.organization_id != org.id:
+            return jsonify({"error": "not found"}), 404
+    else:
+        user = requesting_user
+
     period = request.args.get('period', 'week')
     date_str = request.args.get('date')
+    custom_start = request.args.get('start')
+    custom_end = request.args.get('end')
     today = date.today()
+
     if date_str:
         try:
             day = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -312,30 +494,45 @@ def get_stats():
             })
         except:
             return jsonify({"error": "invalid date"}), 400
-    if period == 'week':
-        start = today - timedelta(days=today.weekday())
-    elif period == 'month':
-        start = today.replace(day=1)
-    elif period == 'year':
-        start = today.replace(month=1, day=1)
-    else:
-        start = today - timedelta(days=30)
-    sessions = WorkSession.query.filter(WorkSession.user_id == user.id, WorkSession.date >= start).all()
+
+    start, end = get_period_bounds(period, custom_start, custom_end)
+
+    sessions = WorkSession.query.filter(
+        WorkSession.user_id == user.id,
+        WorkSession.date >= start,
+        WorkSession.date <= end
+    ).all()
     total_min = sum(s.duration_minutes for s in sessions)
     total_hours = total_min / 60
     earnings = total_hours * user.hourly_rate
-    dates = []
-    minutes = []
-    current = start
-    while current <= today:
-        day_sessions = [s for s in sessions if s.date == current]
-        day_min = sum(s.duration_minutes for s in day_sessions)
-        dates.append(current.strftime('%d.%m'))
-        minutes.append(day_min / 60)
-        current += timedelta(days=1)
+
+    if (end - start).days > 90:
+        labels = []
+        values = []
+        current = start.replace(day=1)
+        while current <= end:
+            month_sessions = [s for s in sessions if s.date.year == current.year and s.date.month == current.month]
+            month_min = sum(s.duration_minutes for s in month_sessions)
+            labels.append(current.strftime('%b %Y'))
+            values.append(round(month_min / 60, 2))
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+    else:
+        labels = []
+        values = []
+        current = start
+        while current <= end:
+            day_sessions = [s for s in sessions if s.date == current]
+            day_min = sum(s.duration_minutes for s in day_sessions)
+            labels.append(current.strftime('%d.%m'))
+            values.append(round(day_min / 60, 2))
+            current += timedelta(days=1)
+
     return jsonify({
-        "labels": dates,
-        "values": minutes,
+        "labels": labels,
+        "values": values,
         "total_hours": round(total_hours, 2),
         "earnings": round(earnings, 2),
         "rate": user.hourly_rate
@@ -351,35 +548,52 @@ def admin_all_stats():
     org = get_current_organization()
     users = User.query.filter_by(organization_id=org.id, role='user').all()
     period = request.args.get('period', 'week')
+    custom_start = request.args.get('start')
+    custom_end = request.args.get('end')
     today = date.today()
-    if period == 'week':
-        start = today - timedelta(days=today.weekday())
-    elif period == 'month':
-        start = today.replace(day=1)
-    elif period == 'year':
-        start = today.replace(month=1, day=1)
-    else:
-        start = today - timedelta(days=30)
+
+    start, end = get_period_bounds(period, custom_start, custom_end)
+
     result = []
     for u in users:
-        sessions = WorkSession.query.filter(WorkSession.user_id == u.id, WorkSession.date >= start).all()
+        sessions = WorkSession.query.filter(
+            WorkSession.user_id == u.id,
+            WorkSession.date >= start,
+            WorkSession.date <= end
+        ).all()
         total_min = sum(s.duration_minutes for s in sessions)
         total_hours = total_min / 60
         earnings = total_hours * u.hourly_rate
-        dates = []
-        minutes = []
-        current = start
-        while current <= today:
-            day_sessions = [s for s in sessions if s.date == current]
-            day_min = sum(s.duration_minutes for s in day_sessions)
-            dates.append(current.strftime('%d.%m'))
-            minutes.append(day_min / 60)
-            current += timedelta(days=1)
+
+        if (end - start).days > 90:
+            labels = []
+            values = []
+            current = start.replace(day=1)
+            while current <= end:
+                month_sessions = [s for s in sessions if s.date.year == current.year and s.date.month == current.month]
+                month_min = sum(s.duration_minutes for s in month_sessions)
+                labels.append(current.strftime('%b %Y'))
+                values.append(round(month_min / 60, 2))
+                if current.month == 12:
+                    current = current.replace(year=current.year + 1, month=1)
+                else:
+                    current = current.replace(month=current.month + 1)
+        else:
+            labels = []
+            values = []
+            current = start
+            while current <= end:
+                day_sessions = [s for s in sessions if s.date == current]
+                day_min = sum(s.duration_minutes for s in day_sessions)
+                labels.append(current.strftime('%d.%m'))
+                values.append(round(day_min / 60, 2))
+                current += timedelta(days=1)
+
         result.append({
             "id": u.id,
             "name": f"{u.first_name} {u.last_name}",
-            "labels": dates,
-            "values": minutes,
+            "labels": labels,
+            "values": values,
             "total_hours": round(total_hours, 2),
             "earnings": round(earnings, 2)
         })
@@ -408,21 +622,22 @@ def api_login():
         return jsonify({"error": "Invalid organization"}), 401
     u = User.query.filter_by(login=login, password=password, organization_id=org.id).first()
     if u:
+        if u.role == 'admin':
+            return jsonify({"error": "Администраторы не могут входить через клиент"}), 403
         tasks = []
-        if u.role != 'admin':
-            for t in u.tasks:
-                total = len(t.users)
-                completed = TaskCompletion.query.filter_by(task_id=t.id, completed=True).count()
-                tasks.append({
-                    "id": t.id,
-                    "title": t.title,
-                    "deadline": str(t.deadline),
-                    "urgent": (t.deadline - date.today()).days <= 2 and not t.is_done,
-                    "assignees": [f"{user.first_name} {user.last_name}" for user in t.users],
-                    "completed_by_me": TaskCompletion.query.filter_by(task_id=t.id, user_id=u.id, completed=True).first() is not None,
-                    "progress": f"{completed}/{total}",
-                    "is_done": t.is_done
-                })
+        for t in u.tasks:
+            total = len(t.users)
+            completed = TaskCompletion.query.filter_by(task_id=t.id, completed=True).count()
+            tasks.append({
+                "id": t.id,
+                "title": t.title,
+                "deadline": str(t.deadline),
+                "urgent": (t.deadline - date.today()).days <= 2 and not t.is_done,
+                "assignees": [f"{user.first_name} {user.last_name}" for user in t.users],
+                "completed_by_me": TaskCompletion.query.filter_by(task_id=t.id, user_id=u.id, completed=True).first() is not None,
+                "progress": f"{completed}/{total}",
+                "is_done": t.is_done
+            })
         hist = WorkSession.query.filter_by(user_id=u.id).order_by(WorkSession.date.desc()).limit(5).all()
         chart = {
             "labels": [s.date.strftime('%d.%m') for s in reversed(hist)],
@@ -496,7 +711,7 @@ def mark_task_done_api(task_id):
         return jsonify({"status": "ok"})
     return jsonify({"error": "completion record not found"}), 404
 
-# ---------- Админские API для клиента ----------
+# ---------- Админские API ----------
 @app.route('/api/admin/adjust_time', methods=['POST'])
 def admin_adjust_time():
     data = request.json
@@ -525,9 +740,19 @@ def admin_adjust_time():
     db.session.commit()
     return jsonify({"status": "ok", "new_total": ws.duration_minutes})
 
-@app.route('/api/admin/delete_adjustment/<int:sid>', methods=['POST'])
+@app.route('/api/admin/delete_adjustment/<int:sid>', methods=['POST', 'DELETE'])
 def admin_delete_adjustment(sid):
-    data = request.json
+    if 'user_id' in session:
+        admin = User.query.get(session['user_id'])
+        if admin and admin.role == 'admin':
+            ws = WorkSession.query.get(sid)
+            if not ws:
+                return jsonify({"error": "not found"}), 404
+            if ws.manual_adjustment:
+                db.session.delete(ws)
+                db.session.commit()
+            return jsonify({"status": "ok"})
+    data = request.json or {}
     admin_login = data.get('admin_login')
     admin_password = data.get('admin_password')
     if not admin_login or not admin_password:
@@ -543,16 +768,26 @@ def admin_delete_adjustment(sid):
         db.session.commit()
     return jsonify({"status": "ok"})
 
-@app.route('/api/admin/user_sessions/<int:uid>', methods=['POST'])
+@app.route('/api/admin/user_sessions/<int:uid>', methods=['GET', 'POST'])
 def admin_user_sessions(uid):
-    data = request.json
-    admin_login = data.get('admin_login')
-    admin_password = data.get('admin_password')
-    if not admin_login or not admin_password:
-        return jsonify({"error": "missing data"}), 400
-    admin = User.query.filter_by(login=admin_login, password=admin_password).first()
-    if not admin or admin.role != 'admin':
-        return jsonify({"error": "forbidden"}), 403
+    if request.method == 'GET':
+        if 'user_id' not in session:
+            return jsonify({"error": "unauthorized"}), 401
+        admin = User.query.get(session['user_id'])
+        if not admin or admin.role != 'admin':
+            return jsonify({"error": "forbidden"}), 403
+        org = get_current_organization()
+    else:
+        data = request.json
+        admin_login = data.get('admin_login')
+        admin_password = data.get('admin_password')
+        if not admin_login or not admin_password:
+            return jsonify({"error": "missing data"}), 400
+        admin = User.query.filter_by(login=admin_login, password=admin_password).first()
+        if not admin or admin.role != 'admin':
+            return jsonify({"error": "forbidden"}), 403
+        org = Organization.query.get(admin.organization_id)
+
     u = User.query.get(uid)
     if not u or u.organization_id != admin.organization_id:
         return jsonify({"error": "user not found"}), 404
@@ -591,52 +826,69 @@ def total_minutes():
     total = sum(s.duration_minutes for s in sessions)
     return jsonify({"total_min": total})
 
-@app.route('/api/admin/monthly_report')
-def monthly_report():
+@app.route('/api/admin/report')
+def download_report():
     if 'user_id' not in session:
         return jsonify({"error": "unauthorized"}), 401
     admin = User.query.get(session['user_id'])
     if admin.role != 'admin':
         return jsonify({"error": "forbidden"}), 403
     org = get_current_organization()
+
+    period = request.args.get('period', 'month')
     month_str = request.args.get('month')
-    if month_str:
+    custom_start = request.args.get('start')
+    custom_end = request.args.get('end')
+    today = date.today()
+
+    if period == 'month' and month_str:
         try:
             year, month = map(int, month_str.split('-'))
             start_date = date(year, month, 1)
-            if month == 12:
-                end_date = date(year + 1, 1, 1)
-            else:
-                end_date = date(year, month + 1, 1)
+            end_date = date(year, month, monthrange(year, month)[1])
         except:
-            today = date.today()
-            start_date = today.replace(day=1)
-            end_date = (start_date + timedelta(days=32)).replace(day=1)
+            start_date, end_date = get_period_bounds('month')
     else:
-        today = date.today()
-        start_date = today.replace(day=1)
-        end_date = (start_date + timedelta(days=32)).replace(day=1)
+        start_date, end_date = get_period_bounds(period, custom_start, custom_end)
 
     users = User.query.filter_by(organization_id=org.id, role='user').all()
     wb = Workbook()
     ws = wb.active
-    ws.title = f"Отчёт {start_date.strftime('%B %Y')}"
-    headers = ['Сотрудник', 'Отработано часов', 'Заработано (₽)']
+
+    period_label = {
+        'week': 'Неделя',
+        'month': 'Месяц',
+        'quarter': 'Квартал',
+        'year': 'Год',
+        'alltime': 'Всё время',
+        'custom': 'Период',
+    }.get(period, period)
+    ws.title = f"Сводка {start_date.strftime('%d.%m.%Y')}–{end_date.strftime('%d.%m.%Y')}"
+
+    headers = ['Сотрудник', 'Ставка (₽/ч)', 'Отработано часов', 'Заработано (₽)']
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
 
+    total_hours_sum = 0
+    total_earnings_sum = 0
     for u in users:
         sessions = WorkSession.query.filter(
             WorkSession.user_id == u.id,
             WorkSession.date >= start_date,
-            WorkSession.date < end_date
+            WorkSession.date <= end_date
         ).all()
         total_min = sum(s.duration_minutes for s in sessions)
         hours = total_min / 60
         earnings = hours * u.hourly_rate
-        ws.append([f"{u.first_name} {u.last_name}", round(hours, 2), round(earnings, 2)])
+        total_hours_sum += hours
+        total_earnings_sum += earnings
+        ws.append([f"{u.first_name} {u.last_name}", u.hourly_rate, round(hours, 2), round(earnings, 2)])
+
+    ws.append(['ИТОГО', '', round(total_hours_sum, 2), round(total_earnings_sum, 2)])
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True)
 
     for column in ws.columns:
         max_length = 0
@@ -647,15 +899,19 @@ def monthly_report():
                     max_length = len(str(cell.value))
             except:
                 pass
-        adjusted_width = (max_length + 2)
-        ws.column_dimensions[column_letter].width = adjusted_width
+        ws.column_dimensions[column_letter].width = max_length + 4
 
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    filename = f"report_{start_date.strftime('%Y_%m')}.xlsx"
+    filename = f"report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+# Legacy alias
+@app.route('/api/admin/monthly_report')
+def monthly_report():
+    return download_report()
 
 if __name__ == '__main__':
     with app.app_context():

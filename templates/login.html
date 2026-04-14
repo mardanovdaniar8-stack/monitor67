@@ -8,35 +8,31 @@
     <link rel="stylesheet" href="/static/tracker.css">
     <style>
         body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-        .login-card { max-width: 400px; width: 100%; text-align: center; }
-        .brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; }
-        .brand h1 { font-size: 2rem; font-weight: 700; }
-        .brand span { color: var(--accent); }
     </style>
 </head>
 <body>
-    <div class="card login-card">
-        <div class="brand">
+    <div class="card" style="max-width:400px; width:100%;">
+        <div class="auth-brand">
             <h1>Монитор67</h1>
+            <p>Учёт рабочего времени и задач</p>
         </div>
-        <p class="text-secondary" style="margin-bottom: 24px;">Учёт рабочего времени и задач</p>
         <form method="POST">
             <div class="input-group">
                 <label>ID организации</label>
-                <input type="text" name="org_id" placeholder="Например, 1" required>
+                <input type="text" name="org_id" placeholder="Например, 1" inputmode="numeric" required>
             </div>
             <div class="input-group">
                 <label>Логин</label>
-                <input type="text" name="login" placeholder="Введите логин" required>
+                <input type="text" name="login" placeholder="Введите логин" autocomplete="username" required>
             </div>
             <div class="input-group">
                 <label>Пароль</label>
-                <input type="password" name="password" placeholder="••••••••" required>
+                <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
             </div>
-            <button type="submit" class="btn btn-primary" style="width:100%;">Войти</button>
+            <button type="submit" class="btn" style="width:100%; justify-content:center;">Войти</button>
         </form>
-        <div style="margin-top: 20px;">
-            <a href="/register" class="btn btn-outline" style="width:100%;">Создать организацию</a>
+        <div style="margin-top:16px;">
+            <a href="/register" class="btn btn-outline" style="width:100%; justify-content:center;">Создать организацию</a>
         </div>
     </div>
 </body>
