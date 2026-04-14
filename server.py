@@ -666,6 +666,24 @@ def check_invite():
         return jsonify({"valid": True, "org_id": org.id, "org_name": org.name})
     return jsonify({"valid": False}), 400
 
+@app.route('/api/admin/verify', methods=['POST'])
+def api_admin_verify():
+    """Client-side admin credential check. Returns role='admin' on success."""
+    d = request.json or {}
+    org_id = d.get('org_id')
+    login = d.get('login')
+    password = d.get('password')
+    if not org_id or not login or not password:
+        return jsonify({"error": "missing data"}), 400
+    org = Organization.query.get(org_id)
+    if not org:
+        return jsonify({"error": "Invalid organization"}), 401
+    u = User.query.filter_by(login=login, password=password, organization_id=org.id, role='admin').first()
+    if u:
+        return jsonify({"id": u.id, "name": f"{u.first_name} {u.last_name}",
+                        "role": "admin", "org_id": org.id})
+    return jsonify({"error": "Неверные данные или не администратор"}), 403
+
 @app.route('/api/login', methods=['POST'])
 def api_login():
     d = request.json
