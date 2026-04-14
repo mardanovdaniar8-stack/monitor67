@@ -410,6 +410,63 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-page); color: var(
 .text-secondary { color: var(--text-secondary); }
 .text-danger { color: var(--urgent-text); }
 
+/* ---- Form row (two columns) ---- */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 480px) { .form-row { grid-template-columns: 1fr; } }
+
+/* ---- Section label (small uppercase divider) ---- */
+.section-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+/* ---- Employee ID badge in modal ---- */
+.employee-id-badge {
+    display: inline-block;
+    background: var(--bg-page);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 3px 10px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-family: monospace;
+    margin-bottom: 16px;
+}
+
+/* ---- Reveal password section ---- */
+.reveal-password-section {
+    background: #f9f9fb;
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+}
+.revealed-password {
+    margin-top: 10px;
+    background: var(--success-bg);
+    color: var(--success);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: monospace;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.revealed-password.reveal-error {
+    background: var(--urgent-bg);
+    color: var(--urgent-text);
+}
+
+/* ---- Org layout grid ---- */
+@media (max-width: 900px) {
+    #tab-org > div[style*="grid"] { grid-template-columns: 1fr !important; }
+}
+
 /* ---- Login / Register pages ---- */
 .auth-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
 .auth-card { max-width: 420px; width: 100%; }

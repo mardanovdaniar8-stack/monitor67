@@ -7,6 +7,7 @@ from openpyxl.styles import Font, Alignment
 from io import BytesIO
 from flask import Flask, render_template, request, redirect, jsonify, session, url_for, send_file
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dev-key-123'
@@ -27,8 +28,12 @@ class User(db.Model):
     last_name = db.Column(db.String(50))
     login = db.Column(db.String(50))
     password = db.Column(db.String(50))
-    hourly_rate = db.Column(db.Float)
+    hourly_rate = db.Column(db.Float, default=0)
     role = db.Column(db.String(10), default='user')
+    # '*' = superadmin (full access + can manage admins)
+    # 'tasks,profiles,org' = sub-admin with specific rights
+    # None = regular employee
+    permissions = db.Column(db.String(200), nullable=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organization.id'))
     __table_args__ = (db.UniqueConstraint('login', 'organization_id', name='_user_login_org_uc'),)
 
@@ -62,6 +67,7 @@ class WorkSession(db.Model):
     adjusted_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     adjust_reason = db.Column(db.String(200), nullable=True)
 
+# ---------- Helpers ----------
 def generate_invite_code():
     return secrets.token_hex(4).upper()
 
@@ -69,6 +75,28 @@ def get_current_organization():
     if 'org_id' in session:
         return Organization.query.get(session['org_id'])
     return None
+
+def is_superadmin(user):
+    return user is not None and user.role == 'admin' and user.permissions == '*'
+
+def has_perm(user, perm):
+    """Check if admin user has specific permission."""
+    if user is None or user.role != 'admin':
+        return False
+    if user.permissions == '*':
+        return True
+    if user.permissions:
+        return perm in user.permissions.split(',')
+    return False
+
+def get_perms_list(user):
+    if user is None or user.role != 'admin':
+        return []
+    if user.permissions == '*':
+        return ['tasks', 'profiles', 'org', 'superadmin']
+    if user.permissions:
+        return user.permissions.split(',')
+    return []
 
 def get_period_bounds(period, custom_start=None, custom_end=None):
     today = date.today()
@@ -100,6 +128,15 @@ def get_period_bounds(period, custom_start=None, custom_end=None):
         end = today
     return start, end
 
+def run_migrations():
+    """Safely add new columns to existing database."""
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(text('ALTER TABLE user ADD COLUMN permissions VARCHAR(200)'))
+            conn.commit()
+        except Exception:
+            pass
+
 def seed_test_db():
     existing = Organization.query.filter_by(name='Ромашка').first()
     if existing:
@@ -117,6 +154,7 @@ def seed_test_db():
         password='admin123',
         hourly_rate=0,
         role='admin',
+        permissions='*',
         organization_id=org.id
     )
     db.session.add(admin)
@@ -138,12 +176,8 @@ def seed_test_db():
     employees = []
     for fn, ln, login, pw, rate in employees_data:
         u = User(
-            first_name=fn,
-            last_name=ln,
-            login=login,
-            password=pw,
-            hourly_rate=rate,
-            role='user',
+            first_name=fn, last_name=ln, login=login,
+            password=pw, hourly_rate=rate, role='user',
             organization_id=org.id
         )
         db.session.add(u)
@@ -152,7 +186,6 @@ def seed_test_db():
 
     today = date.today()
     start_date = today - timedelta(days=270)
-
     for emp in employees:
         current = start_date
         while current <= today:
@@ -161,12 +194,7 @@ def seed_test_db():
                 minutes = max(300, 480 + variance)
                 if random.random() < 0.1:
                     minutes = random.randint(60, 240)
-                ws = WorkSession(
-                    user_id=emp.id,
-                    date=current,
-                    duration_minutes=minutes
-                )
-                db.session.add(ws)
+                db.session.add(WorkSession(user_id=emp.id, date=current, duration_minutes=minutes))
             current += timedelta(days=1)
 
     tasks_done = [
@@ -190,8 +218,7 @@ def seed_test_db():
         db.session.flush()
         for emp in employees:
             t.users.append(emp)
-            tc = TaskCompletion(task_id=t.id, user_id=emp.id, completed=True)
-            db.session.add(tc)
+            db.session.add(TaskCompletion(task_id=t.id, user_id=emp.id, completed=True))
 
     for title, deadline in tasks_active:
         t = Task(title=title, deadline=deadline, is_done=False, organization_id=org.id)
@@ -199,26 +226,23 @@ def seed_test_db():
         db.session.flush()
         for emp in employees:
             t.users.append(emp)
-            tc = TaskCompletion(task_id=t.id, user_id=emp.id, completed=False)
-            db.session.add(tc)
+            db.session.add(TaskCompletion(task_id=t.id, user_id=emp.id, completed=False))
 
     db.session.commit()
     return org
 
-# ---------- Регистрация ----------
+# ---------- Auth ----------
 @app.route('/register', methods=['GET', 'POST'])
 def register_org():
     if request.method == 'POST':
         org_name = request.form['org_name']
-
         if org_name.strip().lower() == 'test_db':
             org = seed_test_db()
-            admin = User.query.filter_by(organization_id=org.id, role='admin').first()
+            admin = User.query.filter_by(organization_id=org.id, role='admin', permissions='*').first()
             session['user_id'] = admin.id
             session['org_id'] = org.id
             return render_template('register.html', created=True, org_id=org.id, org_name=org.name,
                                    test_mode=True, admin_login=admin.login, admin_password=admin.password)
-
         org = Organization(name=org_name)
         db.session.add(org)
         db.session.flush()
@@ -229,6 +253,7 @@ def register_org():
             password=request.form['password'],
             hourly_rate=0,
             role='admin',
+            permissions='*',
             organization_id=org.id
         )
         db.session.add(admin)
@@ -275,46 +300,38 @@ def admin_panel():
         return redirect(url_for('dashboard'))
     org = Organization.query.get(session['org_id'])
     users = User.query.filter_by(organization_id=org.id, role='user').all()
+    admins = User.query.filter_by(organization_id=org.id, role='admin').all()
     tasks = Task.query.filter_by(organization_id=org.id).all()
     now = datetime.utcnow()
     error = request.args.get('error')
-    return render_template('admin_dashboard.html', org=org, users=users, tasks=tasks, now=now, error=error)
-
-@app.route('/admin/view_user/<int:uid>')
-def admin_view_user(uid):
-    if 'user_id' not in session:
-        return redirect(url_for('login_page'))
-    admin = User.query.get(session['user_id'])
-    if admin.role != 'admin':
-        return redirect(url_for('dashboard'))
-    org = Organization.query.get(session['org_id'])
-    user = User.query.get_or_404(uid)
-    if user.organization_id != org.id:
-        return "Forbidden", 403
-    today = date.today()
-    return render_template('user_dashboard.html', user=user, org=org, today=today, admin_view=True, admin_id=admin.id)
+    perms = get_perms_list(admin)
+    return render_template('admin_dashboard.html', org=org, users=users, admins=admins,
+                           tasks=tasks, now=now, error=error, current_admin=admin, perms=perms)
 
 @app.route('/admin/update_org', methods=['POST'])
 def update_org():
     org = get_current_organization()
     admin = User.query.get(session['user_id'])
-    if not org or admin.role != 'admin':
-        return redirect(url_for('login_page'))
+    if not org or not has_perm(admin, 'org'):
+        return redirect(url_for('admin_panel', error='Нет прав для изменения организации.'))
     org.name = request.form['name']
+    admin.first_name = request.form.get('admin_first_name', admin.first_name)
+    admin.last_name = request.form.get('admin_last_name', admin.last_name)
     if request.form.get('password'):
         admin.password = request.form['password']
     db.session.commit()
     return redirect(url_for('admin_panel'))
 
+# ---------- Employee routes ----------
 @app.route('/admin/add_user', methods=['POST'])
 def add_user():
     org = get_current_organization()
-    admin_user = User.query.get(session['user_id'])
-    if not org or admin_user.role != 'admin':
-        return redirect(url_for('login_page'))
+    admin = User.query.get(session['user_id'])
+    if not org or not has_perm(admin, 'profiles'):
+        return redirect(url_for('admin_panel', error='Нет прав для управления сотрудниками.'))
     login = request.form['login']
     if User.query.filter_by(login=login, organization_id=org.id).first():
-        return redirect(url_for('admin_panel', error=f"Логин '{login}' уже занят в этой организации."))
+        return redirect(url_for('admin_panel', error=f"Логин '{login}' уже занят."))
     u = User(
         first_name=request.form['f_name'],
         last_name=request.form['l_name'],
@@ -332,8 +349,8 @@ def add_user():
 def edit_user(uid):
     org = get_current_organization()
     admin = User.query.get(session['user_id'])
-    if not org or admin.role != 'admin':
-        return redirect(url_for('login_page'))
+    if not org or not has_perm(admin, 'profiles'):
+        return redirect(url_for('admin_panel', error='Нет прав для управления сотрудниками.'))
     u = User.query.get_or_404(uid)
     if u.organization_id != org.id:
         return "Forbidden", 403
@@ -343,7 +360,7 @@ def edit_user(uid):
     u.first_name = request.form['f_name']
     u.last_name = request.form['l_name']
     u.login = new_login
-    if request.form['password']:
+    if request.form.get('password'):
         u.password = request.form['password']
     u.hourly_rate = float(request.form['rate'])
     db.session.commit()
@@ -353,25 +370,91 @@ def edit_user(uid):
 def delete_user(uid):
     org = get_current_organization()
     admin = User.query.get(session['user_id'])
-    if not org or admin.role != 'admin':
-        return redirect(url_for('login_page'))
+    if not org or not has_perm(admin, 'profiles'):
+        return redirect(url_for('admin_panel', error='Нет прав для управления сотрудниками.'))
     u = User.query.get_or_404(uid)
     if u.organization_id != org.id:
         return "Forbidden", 403
     WorkSession.query.filter_by(user_id=uid).delete()
     TaskCompletion.query.filter_by(user_id=uid).delete()
-    for t in u.tasks:
+    for t in list(u.tasks):
         t.users.remove(u)
     db.session.delete(u)
     db.session.commit()
     return redirect(url_for('admin_panel'))
 
+# ---------- Admin management routes ----------
+@app.route('/admin/add_admin', methods=['POST'])
+def add_admin():
+    org = get_current_organization()
+    current = User.query.get(session['user_id'])
+    if not org or not is_superadmin(current):
+        return redirect(url_for('admin_panel', error='Только суперадмин может создавать администраторов.'))
+    login = request.form['login']
+    if User.query.filter_by(login=login, organization_id=org.id).first():
+        return redirect(url_for('admin_panel', error=f"Логин '{login}' уже занят."))
+    perms_selected = request.form.getlist('perms')
+    permissions = ','.join(perms_selected) if perms_selected else ''
+    u = User(
+        first_name=request.form['f_name'],
+        last_name=request.form['l_name'],
+        login=login,
+        password=request.form['password'],
+        hourly_rate=0,
+        role='admin',
+        permissions=permissions,
+        organization_id=org.id
+    )
+    db.session.add(u)
+    db.session.commit()
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/edit_admin/<int:uid>', methods=['POST'])
+def edit_admin(uid):
+    org = get_current_organization()
+    current = User.query.get(session['user_id'])
+    if not org or not is_superadmin(current):
+        return redirect(url_for('admin_panel', error='Только суперадмин может редактировать администраторов.'))
+    u = User.query.get_or_404(uid)
+    if u.organization_id != org.id or u.role != 'admin':
+        return "Forbidden", 403
+    if u.permissions == '*':
+        return redirect(url_for('admin_panel', error='Нельзя изменить суперадмина.'))
+    new_login = request.form['login']
+    if new_login != u.login and User.query.filter_by(login=new_login, organization_id=org.id).first():
+        return redirect(url_for('admin_panel', error=f"Логин '{new_login}' уже занят."))
+    u.first_name = request.form['f_name']
+    u.last_name = request.form['l_name']
+    u.login = new_login
+    if request.form.get('password'):
+        u.password = request.form['password']
+    perms_selected = request.form.getlist('perms')
+    u.permissions = ','.join(perms_selected) if perms_selected else ''
+    db.session.commit()
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/delete_admin/<int:uid>', methods=['POST'])
+def delete_admin(uid):
+    org = get_current_organization()
+    current = User.query.get(session['user_id'])
+    if not org or not is_superadmin(current):
+        return redirect(url_for('admin_panel', error='Только суперадмин может удалять администраторов.'))
+    u = User.query.get_or_404(uid)
+    if u.organization_id != org.id or u.role != 'admin':
+        return "Forbidden", 403
+    if u.permissions == '*':
+        return redirect(url_for('admin_panel', error='Нельзя удалить суперадмина.'))
+    db.session.delete(u)
+    db.session.commit()
+    return redirect(url_for('admin_panel'))
+
+# ---------- Task routes ----------
 @app.route('/admin/add_task', methods=['POST'])
 def add_task():
     org = get_current_organization()
     admin = User.query.get(session['user_id'])
-    if not org or admin.role != 'admin':
-        return redirect(url_for('login_page'))
+    if not org or not has_perm(admin, 'tasks'):
+        return redirect(url_for('admin_panel', error='Нет прав для управления задачами.'))
     dl = datetime.strptime(request.form['deadline'], '%Y-%m-%d').date()
     t = Task(title=request.form['title'], deadline=dl, organization_id=org.id)
     db.session.add(t)
@@ -380,8 +463,7 @@ def add_task():
         u = User.query.get(int(uid))
         if u and u.organization_id == org.id:
             t.users.append(u)
-            tc = TaskCompletion(task_id=t.id, user_id=u.id, completed=False)
-            db.session.add(tc)
+            db.session.add(TaskCompletion(task_id=t.id, user_id=u.id, completed=False))
     db.session.commit()
     return redirect(url_for('admin_panel'))
 
@@ -389,8 +471,8 @@ def add_task():
 def edit_task(tid):
     org = get_current_organization()
     admin = User.query.get(session['user_id'])
-    if not org or admin.role != 'admin':
-        return redirect(url_for('login_page'))
+    if not org or not has_perm(admin, 'tasks'):
+        return redirect(url_for('admin_panel', error='Нет прав для управления задачами.'))
     t = Task.query.get_or_404(tid)
     if t.organization_id != org.id:
         return "Forbidden", 403
@@ -406,8 +488,7 @@ def edit_task(tid):
         u = User.query.get(uid)
         if u and u.organization_id == org.id:
             t.users.append(u)
-            tc = TaskCompletion(task_id=t.id, user_id=uid, completed=False)
-            db.session.add(tc)
+            db.session.add(TaskCompletion(task_id=t.id, user_id=uid, completed=False))
     db.session.commit()
     return redirect(url_for('admin_panel'))
 
@@ -415,8 +496,8 @@ def edit_task(tid):
 def delete_task(tid):
     org = get_current_organization()
     admin = User.query.get(session['user_id'])
-    if not org or admin.role != 'admin':
-        return redirect(url_for('login_page'))
+    if not org or not has_perm(admin, 'tasks'):
+        return redirect(url_for('admin_panel', error='Нет прав для управления задачами.'))
     t = Task.query.get_or_404(tid)
     if t.organization_id != org.id:
         return "Forbidden", 403
@@ -453,15 +534,29 @@ def generate_invite():
     org.invite_code = generate_invite_code()
     org.invite_code_expires = datetime.utcnow() + timedelta(minutes=15)
     db.session.commit()
-    import time
     expires_ts = int(org.invite_code_expires.timestamp() * 1000)
-    return jsonify({
-        "invite_code": org.invite_code,
-        "expires": org.invite_code_expires.strftime('%H:%M'),
-        "expires_ts": expires_ts
-    })
+    return jsonify({"invite_code": org.invite_code, "expires": org.invite_code_expires.strftime('%H:%M'), "expires_ts": expires_ts})
 
-# ---------- API Статистика ----------
+# ---------- API: reveal password ----------
+@app.route('/api/admin/reveal_password', methods=['POST'])
+def reveal_password():
+    if 'user_id' not in session:
+        return jsonify({"error": "unauthorized"}), 401
+    admin = User.query.get(session['user_id'])
+    if admin.role != 'admin':
+        return jsonify({"error": "forbidden"}), 403
+    data = request.json
+    user_id = data.get('user_id')
+    admin_password = data.get('admin_password')
+    if not admin_password or admin.password != admin_password:
+        return jsonify({"error": "Неверный пароль администратора"}), 403
+    org = get_current_organization()
+    u = User.query.get(user_id)
+    if not u or u.organization_id != org.id:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"password": u.password})
+
+# ---------- API: Stats ----------
 @app.route('/api/stats')
 def get_stats():
     if 'user_id' not in session:
@@ -487,56 +582,36 @@ def get_stats():
             day = datetime.strptime(date_str, '%Y-%m-%d').date()
             sessions = WorkSession.query.filter(WorkSession.user_id == user.id, WorkSession.date == day).all()
             total_min = sum(s.duration_minutes for s in sessions)
-            return jsonify({
-                "date": day.strftime('%d.%m.%Y'),
-                "hours": round(total_min / 60, 2),
-                "earnings": round((total_min / 60) * user.hourly_rate, 2)
-            })
+            return jsonify({"date": day.strftime('%d.%m.%Y'), "hours": round(total_min / 60, 2),
+                            "earnings": round((total_min / 60) * user.hourly_rate, 2)})
         except:
             return jsonify({"error": "invalid date"}), 400
 
     start, end = get_period_bounds(period, custom_start, custom_end)
-
-    sessions = WorkSession.query.filter(
-        WorkSession.user_id == user.id,
-        WorkSession.date >= start,
-        WorkSession.date <= end
-    ).all()
+    sessions = WorkSession.query.filter(WorkSession.user_id == user.id, WorkSession.date >= start, WorkSession.date <= end).all()
     total_min = sum(s.duration_minutes for s in sessions)
     total_hours = total_min / 60
     earnings = total_hours * user.hourly_rate
 
     if (end - start).days > 90:
-        labels = []
-        values = []
+        labels, values = [], []
         current = start.replace(day=1)
         while current <= end:
-            month_sessions = [s for s in sessions if s.date.year == current.year and s.date.month == current.month]
-            month_min = sum(s.duration_minutes for s in month_sessions)
+            month_min = sum(s.duration_minutes for s in sessions if s.date.year == current.year and s.date.month == current.month)
             labels.append(current.strftime('%b %Y'))
             values.append(round(month_min / 60, 2))
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1)
-            else:
-                current = current.replace(month=current.month + 1)
+            current = current.replace(month=current.month % 12 + 1, year=current.year + (1 if current.month == 12 else 0))
     else:
-        labels = []
-        values = []
+        labels, values = [], []
         current = start
         while current <= end:
-            day_sessions = [s for s in sessions if s.date == current]
-            day_min = sum(s.duration_minutes for s in day_sessions)
+            day_min = sum(s.duration_minutes for s in sessions if s.date == current)
             labels.append(current.strftime('%d.%m'))
             values.append(round(day_min / 60, 2))
             current += timedelta(days=1)
 
-    return jsonify({
-        "labels": labels,
-        "values": values,
-        "total_hours": round(total_hours, 2),
-        "earnings": round(earnings, 2),
-        "rate": user.hourly_rate
-    })
+    return jsonify({"labels": labels, "values": values, "total_hours": round(total_hours, 2),
+                    "earnings": round(earnings, 2), "rate": user.hourly_rate})
 
 @app.route('/api/admin/all_stats')
 def admin_all_stats():
@@ -551,55 +626,37 @@ def admin_all_stats():
     custom_start = request.args.get('start')
     custom_end = request.args.get('end')
     today = date.today()
-
     start, end = get_period_bounds(period, custom_start, custom_end)
 
     result = []
     for u in users:
-        sessions = WorkSession.query.filter(
-            WorkSession.user_id == u.id,
-            WorkSession.date >= start,
-            WorkSession.date <= end
-        ).all()
+        sessions = WorkSession.query.filter(WorkSession.user_id == u.id, WorkSession.date >= start, WorkSession.date <= end).all()
         total_min = sum(s.duration_minutes for s in sessions)
         total_hours = total_min / 60
         earnings = total_hours * u.hourly_rate
 
         if (end - start).days > 90:
-            labels = []
-            values = []
+            labels, values = [], []
             current = start.replace(day=1)
             while current <= end:
-                month_sessions = [s for s in sessions if s.date.year == current.year and s.date.month == current.month]
-                month_min = sum(s.duration_minutes for s in month_sessions)
+                month_min = sum(s.duration_minutes for s in sessions if s.date.year == current.year and s.date.month == current.month)
                 labels.append(current.strftime('%b %Y'))
                 values.append(round(month_min / 60, 2))
-                if current.month == 12:
-                    current = current.replace(year=current.year + 1, month=1)
-                else:
-                    current = current.replace(month=current.month + 1)
+                current = current.replace(month=current.month % 12 + 1, year=current.year + (1 if current.month == 12 else 0))
         else:
-            labels = []
-            values = []
+            labels, values = [], []
             current = start
             while current <= end:
-                day_sessions = [s for s in sessions if s.date == current]
-                day_min = sum(s.duration_minutes for s in day_sessions)
+                day_min = sum(s.duration_minutes for s in sessions if s.date == current)
                 labels.append(current.strftime('%d.%m'))
                 values.append(round(day_min / 60, 2))
                 current += timedelta(days=1)
 
-        result.append({
-            "id": u.id,
-            "name": f"{u.first_name} {u.last_name}",
-            "labels": labels,
-            "values": values,
-            "total_hours": round(total_hours, 2),
-            "earnings": round(earnings, 2)
-        })
+        result.append({"id": u.id, "name": f"{u.first_name} {u.last_name}", "labels": labels,
+                       "values": values, "total_hours": round(total_hours, 2), "earnings": round(earnings, 2)})
     return jsonify(result)
 
-# ---------- API для клиента ----------
+# ---------- Client API ----------
 @app.route('/api/check_invite', methods=['POST'])
 def check_invite():
     data = request.json
@@ -628,30 +685,17 @@ def api_login():
         for t in u.tasks:
             total = len(t.users)
             completed = TaskCompletion.query.filter_by(task_id=t.id, completed=True).count()
-            tasks.append({
-                "id": t.id,
-                "title": t.title,
-                "deadline": str(t.deadline),
-                "urgent": (t.deadline - date.today()).days <= 2 and not t.is_done,
-                "assignees": [f"{user.first_name} {user.last_name}" for user in t.users],
-                "completed_by_me": TaskCompletion.query.filter_by(task_id=t.id, user_id=u.id, completed=True).first() is not None,
-                "progress": f"{completed}/{total}",
-                "is_done": t.is_done
-            })
+            tasks.append({"id": t.id, "title": t.title, "deadline": str(t.deadline),
+                          "urgent": (t.deadline - date.today()).days <= 2 and not t.is_done,
+                          "assignees": [f"{user.first_name} {user.last_name}" for user in t.users],
+                          "completed_by_me": TaskCompletion.query.filter_by(task_id=t.id, user_id=u.id, completed=True).first() is not None,
+                          "progress": f"{completed}/{total}", "is_done": t.is_done})
         hist = WorkSession.query.filter_by(user_id=u.id).order_by(WorkSession.date.desc()).limit(5).all()
-        chart = {
-            "labels": [s.date.strftime('%d.%m') for s in reversed(hist)],
-            "values": [round(s.duration_minutes / 60, 2) for s in reversed(hist)]
-        }
-        return jsonify({
-            "id": u.id,
-            "name": u.first_name,
-            "rate": u.hourly_rate,
-            "role": u.role,
-            "total_min": sum(s.duration_minutes for s in WorkSession.query.filter_by(user_id=u.id).all()),
-            "tasks": tasks,
-            "chart": chart
-        })
+        return jsonify({"id": u.id, "name": u.first_name, "rate": u.hourly_rate, "role": u.role,
+                        "total_min": sum(s.duration_minutes for s in WorkSession.query.filter_by(user_id=u.id).all()),
+                        "tasks": tasks,
+                        "chart": {"labels": [s.date.strftime('%d.%m') for s in reversed(hist)],
+                                  "values": [round(s.duration_minutes / 60, 2) for s in reversed(hist)]}})
     return jsonify({"error": "Invalid credentials"}), 401
 
 @app.route('/api/sync', methods=['POST'])
@@ -677,16 +721,11 @@ def get_tasks_api():
     for t in u.tasks:
         total = len(t.users)
         completed = TaskCompletion.query.filter_by(task_id=t.id, completed=True).count()
-        tasks.append({
-            "id": t.id,
-            "title": t.title,
-            "deadline": str(t.deadline),
-            "is_done": t.is_done,
-            "urgent": (t.deadline - date.today()).days <= 2 and not t.is_done,
-            "assignees": [f"{user.first_name} {user.last_name}" for user in t.users],
-            "completed_by_me": TaskCompletion.query.filter_by(task_id=t.id, user_id=u.id, completed=True).first() is not None,
-            "progress": f"{completed}/{total}"
-        })
+        tasks.append({"id": t.id, "title": t.title, "deadline": str(t.deadline), "is_done": t.is_done,
+                      "urgent": (t.deadline - date.today()).days <= 2 and not t.is_done,
+                      "assignees": [f"{user.first_name} {user.last_name}" for user in t.users],
+                      "completed_by_me": TaskCompletion.query.filter_by(task_id=t.id, user_id=u.id, completed=True).first() is not None,
+                      "progress": f"{completed}/{total}"})
     return jsonify(tasks)
 
 @app.route('/api/task/<int:task_id>/done', methods=['POST'])
@@ -704,14 +743,12 @@ def mark_task_done_api(task_id):
         tc.completed = True
         db.session.commit()
         total = len(task.users)
-        completed = TaskCompletion.query.filter_by(task_id=task_id, completed=True).count()
-        if completed == total:
+        if TaskCompletion.query.filter_by(task_id=task_id, completed=True).count() == total:
             task.is_done = True
             db.session.commit()
         return jsonify({"status": "ok"})
     return jsonify({"error": "completion record not found"}), 404
 
-# ---------- Админские API ----------
 @app.route('/api/admin/adjust_time', methods=['POST'])
 def admin_adjust_time():
     data = request.json
@@ -728,10 +765,9 @@ def admin_adjust_time():
     u = User.query.get(user_id)
     if not u or u.organization_id != admin.organization_id:
         return jsonify({"error": "user not found"}), 404
-    today = date.today()
-    ws = WorkSession.query.filter_by(user_id=user_id, date=today).first()
+    ws = WorkSession.query.filter_by(user_id=user_id, date=date.today()).first()
     if not ws:
-        ws = WorkSession(user_id=user_id, date=today, duration_minutes=0)
+        ws = WorkSession(user_id=user_id, date=date.today(), duration_minutes=0)
         db.session.add(ws)
     ws.duration_minutes = max(0, ws.duration_minutes + minutes)
     ws.manual_adjustment = True
@@ -746,9 +782,7 @@ def admin_delete_adjustment(sid):
         admin = User.query.get(session['user_id'])
         if admin and admin.role == 'admin':
             ws = WorkSession.query.get(sid)
-            if not ws:
-                return jsonify({"error": "not found"}), 404
-            if ws.manual_adjustment:
+            if ws and ws.manual_adjustment:
                 db.session.delete(ws)
                 db.session.commit()
             return jsonify({"status": "ok"})
@@ -776,7 +810,6 @@ def admin_user_sessions(uid):
         admin = User.query.get(session['user_id'])
         if not admin or admin.role != 'admin':
             return jsonify({"error": "forbidden"}), 403
-        org = get_current_organization()
     else:
         data = request.json
         admin_login = data.get('admin_login')
@@ -786,19 +819,13 @@ def admin_user_sessions(uid):
         admin = User.query.filter_by(login=admin_login, password=admin_password).first()
         if not admin or admin.role != 'admin':
             return jsonify({"error": "forbidden"}), 403
-        org = Organization.query.get(admin.organization_id)
 
     u = User.query.get(uid)
     if not u or u.organization_id != admin.organization_id:
         return jsonify({"error": "user not found"}), 404
     sessions = WorkSession.query.filter_by(user_id=uid).order_by(WorkSession.date.desc()).limit(30).all()
-    return jsonify([{
-        "id": s.id,
-        "date": s.date.strftime('%d.%m.%Y'),
-        "minutes": s.duration_minutes,
-        "manual": s.manual_adjustment,
-        "reason": s.adjust_reason
-    } for s in sessions])
+    return jsonify([{"id": s.id, "date": s.date.strftime('%d.%m.%Y'), "minutes": s.duration_minutes,
+                     "manual": s.manual_adjustment, "reason": s.adjust_reason} for s in sessions])
 
 @app.route('/api/admin/users', methods=['POST'])
 def admin_users():
@@ -823,8 +850,7 @@ def total_minutes():
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
     sessions = WorkSession.query.filter_by(user_id=user_id, date=date.today()).all()
-    total = sum(s.duration_minutes for s in sessions)
-    return jsonify({"total_min": total})
+    return jsonify({"total_min": sum(s.duration_minutes for s in sessions)})
 
 @app.route('/api/admin/report')
 def download_report():
@@ -834,12 +860,10 @@ def download_report():
     if admin.role != 'admin':
         return jsonify({"error": "forbidden"}), 403
     org = get_current_organization()
-
     period = request.args.get('period', 'month')
     month_str = request.args.get('month')
     custom_start = request.args.get('start')
     custom_end = request.args.get('end')
-    today = date.today()
 
     if period == 'month' and month_str:
         try:
@@ -854,18 +878,8 @@ def download_report():
     users = User.query.filter_by(organization_id=org.id, role='user').all()
     wb = Workbook()
     ws = wb.active
-
-    period_label = {
-        'week': 'Неделя',
-        'month': 'Месяц',
-        'quarter': 'Квартал',
-        'year': 'Год',
-        'alltime': 'Всё время',
-        'custom': 'Период',
-    }.get(period, period)
     ws.title = f"Сводка {start_date.strftime('%d.%m.%Y')}–{end_date.strftime('%d.%m.%Y')}"
-
-    headers = ['Сотрудник', 'Ставка (₽/ч)', 'Отработано часов', 'Заработано (₽)']
+    headers = ['ID', 'Сотрудник', 'Ставка (₽/ч)', 'Отработано часов', 'Заработано (₽)']
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -874,32 +888,22 @@ def download_report():
     total_hours_sum = 0
     total_earnings_sum = 0
     for u in users:
-        sessions = WorkSession.query.filter(
-            WorkSession.user_id == u.id,
-            WorkSession.date >= start_date,
-            WorkSession.date <= end_date
-        ).all()
+        sessions = WorkSession.query.filter(WorkSession.user_id == u.id,
+                                            WorkSession.date >= start_date, WorkSession.date <= end_date).all()
         total_min = sum(s.duration_minutes for s in sessions)
         hours = total_min / 60
         earnings = hours * u.hourly_rate
         total_hours_sum += hours
         total_earnings_sum += earnings
-        ws.append([f"{u.first_name} {u.last_name}", u.hourly_rate, round(hours, 2), round(earnings, 2)])
+        ws.append([u.id, f"{u.first_name} {u.last_name}", u.hourly_rate, round(hours, 2), round(earnings, 2)])
 
-    ws.append(['ИТОГО', '', round(total_hours_sum, 2), round(total_earnings_sum, 2)])
+    ws.append(['', 'ИТОГО', '', round(total_hours_sum, 2), round(total_earnings_sum, 2)])
     for cell in ws[ws.max_row]:
         cell.font = Font(bold=True)
 
     for column in ws.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        ws.column_dimensions[column_letter].width = max_length + 4
+        max_length = max((len(str(cell.value or '')) for cell in column), default=0)
+        ws.column_dimensions[column[0].column_letter].width = max_length + 4
 
     output = BytesIO()
     wb.save(output)
@@ -908,7 +912,6 @@ def download_report():
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-# Legacy alias
 @app.route('/api/admin/monthly_report')
 def monthly_report():
     return download_report()
@@ -916,4 +919,5 @@ def monthly_report():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        run_migrations()
     app.run(host='0.0.0.0', port=5000, debug=True)

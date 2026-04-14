@@ -13,7 +13,7 @@
     <header class="page-header">
         <div class="page-header__left">
             <h1 class="page-title">{{ org.name }}</h1>
-            <span class="page-subtitle">Панель управления</span>
+            <span class="page-subtitle">{{ current_admin.first_name }} {{ current_admin.last_name }} · ID {{ org.id }}</span>
         </div>
         <div class="page-header__right">
             <div class="invite-block">
@@ -40,9 +40,15 @@
 
     <div class="tabs">
         <button class="tab-btn active" data-tab="stats"><img src="/static/icons/stats.png" alt=""> <span>Статистика</span></button>
+        {% if 'profiles' in perms or 'superadmin' in perms %}
         <button class="tab-btn" data-tab="employees"><img src="/static/icons/user.png" alt=""> <span>Сотрудники</span></button>
+        {% endif %}
+        {% if 'tasks' in perms or 'superadmin' in perms %}
         <button class="tab-btn" data-tab="tasks"><img src="/static/icons/task.png" alt=""> <span>Задачи</span></button>
+        {% endif %}
+        {% if 'org' in perms or 'superadmin' in perms %}
         <button class="tab-btn" data-tab="org"><img src="/static/icons/edit.png" alt=""> <span>Организация</span></button>
+        {% endif %}
     </div>
 
     <!-- Статистика -->
@@ -73,11 +79,13 @@
                         <option value="custom">Произвольный</option>
                     </select>
                     <input type="month" id="reportMonth" class="form-control form-control--sm" style="display:block;">
-                    <div id="reportCustomRange" style="display:none;">
+                    <div id="reportCustomRange" style="display:none; gap:6px;">
                         <input type="date" id="reportStart" class="form-control form-control--sm">
                         <input type="date" id="reportEnd" class="form-control form-control--sm">
                     </div>
-                    <button class="btn btn-sm" id="downloadReportBtn">⬇ Скачать сводку</button>
+                    <button class="btn btn-sm" id="downloadReportBtn">
+                        <img src="/static/icons/done.png" alt=""> Скачать сводку
+                    </button>
                 </div>
             </div>
         </div>
@@ -85,6 +93,7 @@
     </div>
 
     <!-- Сотрудники -->
+    {% if 'profiles' in perms or 'superadmin' in perms %}
     <div id="tab-employees" class="tab-content">
         <div class="table-toolbar">
             <input type="text" id="employeeSearch" placeholder="Поиск сотрудников..." class="form-control search-input">
@@ -94,6 +103,7 @@
             <table class="data-table" id="employeesTable">
                 <thead>
                     <tr>
+                        <th>ID</th>
                         <th>Имя</th>
                         <th>Логин</th>
                         <th>Ставка (₽/ч)</th>
@@ -104,14 +114,14 @@
                 <tbody>
                     {% for u in users %}
                     <tr>
+                        <td class="text-secondary" style="font-size:0.82rem;">{{ u.id }}</td>
                         <td><strong>{{ u.first_name }} {{ u.last_name }}</strong></td>
                         <td class="text-secondary">{{ u.login }}</td>
                         <td>{{ u.hourly_rate }} ₽</td>
                         <td>{{ (u.sessions | sum(attribute='duration_minutes') / 60) | round(1) }} ч</td>
                         <td>
                             <div class="action-icons">
-                                <a href="/admin/view_user/{{ u.id }}" class="btn btn-sm btn-outline" title="Просмотр как сотрудник">👁</a>
-                                <button class="icon-btn" onclick="openSessionsModal({{ u.id }})" title="История сессий"><img src="/static/icons/clock.png" alt="Сессии"></button>
+                                <button class="icon-btn" onclick="openSessionsModal({{ u.id }}, '{{ u.first_name }} {{ u.last_name }}')" title="История сессий"><img src="/static/icons/clock.png" alt="Сессии"></button>
                                 <button class="icon-btn" onclick="openEditUserModal({{ u.id }}, '{{ u.first_name }}', '{{ u.last_name }}', '{{ u.login }}', {{ u.hourly_rate }})" title="Редактировать"><img src="/static/icons/edit.png" alt="Ред"></button>
                                 <form action="/admin/delete_user/{{ u.id }}" method="POST" onsubmit="return confirm('Удалить сотрудника?');" style="display:inline;">
                                     <button type="submit" class="icon-btn" title="Удалить"><img src="/static/icons/delete.png" alt="Уд"></button>
@@ -124,8 +134,10 @@
             </table>
         </div>
     </div>
+    {% endif %}
 
     <!-- Задачи -->
+    {% if 'tasks' in perms or 'superadmin' in perms %}
     <div id="tab-tasks" class="tab-content">
         <div class="table-toolbar">
             <input type="text" id="taskSearch" placeholder="Поиск задач..." class="form-control search-input">
@@ -158,17 +170,14 @@
                             <span class="text-secondary" style="font-size:0.8rem;">{{ completed }}/{{ total }}</span>
                         </td>
                         <td>
-                            {% if t.is_done %}
-                                <span class="badge badge-success">Завершено</span>
-                            {% else %}
-                                <span class="badge badge-active">Активно</span>
-                            {% endif %}
+                            {% if t.is_done %}<span class="badge badge-success">Завершено</span>
+                            {% else %}<span class="badge badge-active">Активно</span>{% endif %}
                         </td>
                         <td>
                             <div class="action-icons">
-                                <button class="icon-btn" onclick="openEditTaskModal({{ t.id }}, '{{ t.title }}', '{{ t.deadline }}', {{ t.users | map(attribute='id') | list }})" title="Редактировать"><img src="/static/icons/edit.png"></button>
+                                <button class="icon-btn" onclick="openEditTaskModal({{ t.id }}, '{{ t.title }}', '{{ t.deadline }}', {{ t.users | map(attribute='id') | list }})"><img src="/static/icons/edit.png"></button>
                                 <form action="/admin/delete_task/{{ t.id }}" method="POST" onsubmit="return confirm('Удалить задачу?');" style="display:inline;">
-                                    <button type="submit" class="icon-btn" title="Удалить"><img src="/static/icons/delete.png"></button>
+                                    <button type="submit" class="icon-btn"><img src="/static/icons/delete.png"></button>
                                 </form>
                             </div>
                         </td>
@@ -178,38 +187,111 @@
             </table>
         </div>
     </div>
+    {% endif %}
 
     <!-- Организация -->
+    {% if 'org' in perms or 'superadmin' in perms %}
     <div id="tab-org" class="tab-content">
-        <div class="card" style="max-width: 520px;">
-            <h3>Редактирование организации</h3>
-            <form action="/admin/update_org" method="POST" style="margin-top:20px;">
-                <div class="input-group">
-                    <label>Название организации</label>
-                    <input type="text" name="name" value="{{ org.name }}" required>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; align-items:start;">
+
+            <!-- Настройки организации -->
+            <div class="card">
+                <h3>Параметры организации</h3>
+                <form action="/admin/update_org" method="POST" style="margin-top:20px;">
+                    <div class="section-label">Организация</div>
+                    <div class="input-group">
+                        <label>Название</label>
+                        <input type="text" name="name" value="{{ org.name }}" required>
+                    </div>
+                    <div class="section-label" style="margin-top:16px;">Администратор</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 14px;">
+                        <div class="input-group">
+                            <label>Имя</label>
+                            <input type="text" name="admin_first_name" value="{{ current_admin.first_name }}" required>
+                        </div>
+                        <div class="input-group">
+                            <label>Фамилия</label>
+                            <input type="text" name="admin_last_name" value="{{ current_admin.last_name }}" required>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>Новый пароль</label>
+                        <input type="password" name="password" placeholder="Оставьте пустым, чтобы не менять">
+                    </div>
+                    <button type="submit" class="btn">Сохранить</button>
+                </form>
+            </div>
+
+            <!-- Администраторы -->
+            {% if 'superadmin' in perms %}
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                    <h3>Администраторы</h3>
+                    <button class="btn btn-sm" onclick="openAddAdminModal()"><img src="/static/icons/plus.png" alt=""> Добавить</button>
                 </div>
-                <div class="input-group">
-                    <label>Новый пароль администратора</label>
-                    <input type="password" name="password" placeholder="Оставьте пустым, чтобы не менять">
+
+                {% set sub_admins = admins | selectattr('permissions', 'ne', '*') | list %}
+                {% if sub_admins %}
+                <div class="table-wrapper" style="margin:0;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Имя</th>
+                                <th>Логин</th>
+                                <th>Права</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for a in sub_admins %}
+                            <tr>
+                                <td><strong>{{ a.first_name }} {{ a.last_name }}</strong></td>
+                                <td class="text-secondary">{{ a.login }}</td>
+                                <td>
+                                    {% set a_perms = (a.permissions or '').split(',') %}
+                                    {% if 'tasks' in a_perms %}<span class="badge badge-active" style="margin:2px;">Задачи</span>{% endif %}
+                                    {% if 'profiles' in a_perms %}<span class="badge badge-active" style="margin:2px;">Профили</span>{% endif %}
+                                    {% if 'org' in a_perms %}<span class="badge badge-active" style="margin:2px;">Орг.</span>{% endif %}
+                                    {% if not a.permissions %}<span class="text-secondary" style="font-size:0.82rem;">нет прав</span>{% endif %}
+                                </td>
+                                <td>
+                                    <div class="action-icons">
+                                        <button class="icon-btn" onclick="openEditAdminModal({{ a.id }}, '{{ a.first_name }}', '{{ a.last_name }}', '{{ a.login }}', '{{ a.permissions or '' }}')" title="Редактировать"><img src="/static/icons/edit.png" alt=""></button>
+                                        <form action="/admin/delete_admin/{{ a.id }}" method="POST" onsubmit="return confirm('Удалить администратора?');" style="display:inline;">
+                                            <button type="submit" class="icon-btn" title="Удалить"><img src="/static/icons/delete.png" alt=""></button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
-                <button type="submit" class="btn">Сохранить</button>
-            </form>
+                {% else %}
+                <p class="text-secondary">Нет дополнительных администраторов</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
         </div>
     </div>
+    {% endif %}
 </div>
 
-<!-- Модал: добавление сотрудника -->
+<!-- Модал: добавить сотрудника -->
 <div id="addUserModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
             <h2>Новый сотрудник</h2>
-            <button class="modal-close" onclick="closeModal('addUserModal')">✕</button>
+            <button class="modal-close" onclick="closeModal('addUserModal')">&#10005;</button>
         </div>
         <form action="/admin/add_user" method="POST">
-            <div class="input-group"><label>Имя</label><input name="f_name" placeholder="Иван" required></div>
-            <div class="input-group"><label>Фамилия</label><input name="l_name" placeholder="Иванов" required></div>
+            <div class="form-row">
+                <div class="input-group"><label>Имя</label><input name="f_name" placeholder="Иван" required></div>
+                <div class="input-group"><label>Фамилия</label><input name="l_name" placeholder="Иванов" required></div>
+            </div>
             <div class="input-group"><label>Логин</label><input name="login" placeholder="ivanov" required></div>
-            <div class="input-group"><label>Пароль</label><input name="password" type="password" placeholder="••••••••" required></div>
+            <div class="input-group"><label>Пароль</label><input name="password" type="password" placeholder="Пароль" required></div>
             <div class="input-group"><label>Ставка (₽/час)</label><input name="rate" type="number" step="0.5" min="0" placeholder="350" required></div>
             <div class="modal-actions">
                 <button type="submit" class="btn">Добавить</button>
@@ -219,19 +301,34 @@
     </div>
 </div>
 
-<!-- Модал: редактирование сотрудника -->
+<!-- Модал: редактировать сотрудника -->
 <div id="editUserModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
             <h2>Редактировать сотрудника</h2>
-            <button class="modal-close" onclick="closeModal('editUserModal')">✕</button>
+            <button class="modal-close" onclick="closeModal('editUserModal')">&#10005;</button>
         </div>
         <form id="editUserForm" method="POST">
-            <div class="input-group"><label>Имя</label><input name="f_name" id="editFName" placeholder="Иван" required></div>
-            <div class="input-group"><label>Фамилия</label><input name="l_name" id="editLName" placeholder="Иванов" required></div>
-            <div class="input-group"><label>Логин</label><input name="login" id="editLogin" placeholder="ivanov" required></div>
-            <div class="input-group"><label>Новый пароль</label><input name="password" type="password" placeholder="Оставьте пустым, чтобы не менять"></div>
+            <div class="employee-id-badge" id="editUserIdBadge"></div>
+            <div class="form-row">
+                <div class="input-group"><label>Имя</label><input name="f_name" id="editFName" placeholder="Иван" required></div>
+                <div class="input-group"><label>Фамилия</label><input name="l_name" id="editLName" placeholder="Иванов" required></div>
+            </div>
+            <div class="input-group"><label>Логин</label><input name="login" id="editLogin" required></div>
             <div class="input-group"><label>Ставка (₽/час)</label><input name="rate" id="editRate" type="number" step="0.5" min="0" required></div>
+            <div class="input-group"><label>Новый пароль</label><input name="password" type="password" placeholder="Оставьте пустым, чтобы не менять"></div>
+
+            <div class="reveal-password-section">
+                <div class="section-label">Посмотреть пароль сотрудника</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <input type="password" id="adminPasswordInput" class="form-control form-control--sm" placeholder="Ваш пароль администратора" style="flex:1; min-width:160px;">
+                    <button type="button" class="btn btn-sm btn-outline" onclick="revealPassword()">
+                        <img src="/static/icons/user.png" alt="" style="width:14px;height:14px;"> Показать
+                    </button>
+                </div>
+                <div id="revealedPassword" class="revealed-password" style="display:none;"></div>
+            </div>
+
             <div class="modal-actions">
                 <button type="submit" class="btn">Сохранить</button>
                 <button type="button" class="btn btn-outline" onclick="closeModal('editUserModal')">Отмена</button>
@@ -240,12 +337,12 @@
     </div>
 </div>
 
-<!-- Модал: добавление задачи -->
+<!-- Модал: добавить задачу -->
 <div id="addTaskModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
             <h2>Новая задача</h2>
-            <button class="modal-close" onclick="closeModal('addTaskModal')">✕</button>
+            <button class="modal-close" onclick="closeModal('addTaskModal')">&#10005;</button>
         </div>
         <form action="/admin/add_task" method="POST">
             <div class="input-group"><label>Название</label><input name="title" placeholder="Название задачи" required></div>
@@ -269,12 +366,12 @@
     </div>
 </div>
 
-<!-- Модал: редактирование задачи -->
+<!-- Модал: редактировать задачу -->
 <div id="editTaskModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
             <h2>Редактировать задачу</h2>
-            <button class="modal-close" onclick="closeModal('editTaskModal')">✕</button>
+            <button class="modal-close" onclick="closeModal('editTaskModal')">&#10005;</button>
         </div>
         <form id="editTaskForm" method="POST">
             <div class="input-group"><label>Название</label><input name="title" id="editTaskTitle" required></div>
@@ -303,27 +400,82 @@
     <div class="modal-content">
         <div class="modal-header">
             <h2 id="sessionsModalTitle">История сессий</h2>
-            <button class="modal-close" onclick="closeModal('sessionsModal')">✕</button>
+            <button class="modal-close" onclick="closeModal('sessionsModal')">&#10005;</button>
         </div>
         <div id="sessionsList"></div>
-        <div class="modal-actions">
+        <div class="modal-actions" style="margin-top:16px;">
             <button class="btn btn-outline" onclick="closeModal('sessionsModal')">Закрыть</button>
         </div>
     </div>
 </div>
 
+<!-- Модал: добавить администратора -->
+<div id="addAdminModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Новый администратор</h2>
+            <button class="modal-close" onclick="closeModal('addAdminModal')">&#10005;</button>
+        </div>
+        <form action="/admin/add_admin" method="POST">
+            <div class="form-row">
+                <div class="input-group"><label>Имя</label><input name="f_name" placeholder="Иван" required></div>
+                <div class="input-group"><label>Фамилия</label><input name="l_name" placeholder="Иванов" required></div>
+            </div>
+            <div class="input-group"><label>Логин</label><input name="login" placeholder="manager1" required></div>
+            <div class="input-group"><label>Пароль</label><input name="password" type="password" placeholder="Пароль" required></div>
+            <div class="input-group">
+                <label>Права доступа</label>
+                <div class="checkbox-list">
+                    <label class="checkbox-item"><input type="checkbox" name="perms" value="tasks"><span>Управление задачами</span></label>
+                    <label class="checkbox-item"><input type="checkbox" name="perms" value="profiles"><span>Управление сотрудниками</span></label>
+                    <label class="checkbox-item"><input type="checkbox" name="perms" value="org"><span>Настройки организации</span></label>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="submit" class="btn">Создать</button>
+                <button type="button" class="btn btn-outline" onclick="closeModal('addAdminModal')">Отмена</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Модал: редактировать администратора -->
+<div id="editAdminModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Редактировать администратора</h2>
+            <button class="modal-close" onclick="closeModal('editAdminModal')">&#10005;</button>
+        </div>
+        <form id="editAdminForm" method="POST">
+            <div class="form-row">
+                <div class="input-group"><label>Имя</label><input name="f_name" id="editAdminFName" required></div>
+                <div class="input-group"><label>Фамилия</label><input name="l_name" id="editAdminLName" required></div>
+            </div>
+            <div class="input-group"><label>Логин</label><input name="login" id="editAdminLogin" required></div>
+            <div class="input-group"><label>Новый пароль</label><input name="password" type="password" placeholder="Оставьте пустым, чтобы не менять"></div>
+            <div class="input-group">
+                <label>Права доступа</label>
+                <div class="checkbox-list" id="editAdminPerms">
+                    <label class="checkbox-item"><input type="checkbox" name="perms" value="tasks" id="editPerm_tasks"><span>Управление задачами</span></label>
+                    <label class="checkbox-item"><input type="checkbox" name="perms" value="profiles" id="editPerm_profiles"><span>Управление сотрудниками</span></label>
+                    <label class="checkbox-item"><input type="checkbox" name="perms" value="org" id="editPerm_org"><span>Настройки организации</span></label>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="submit" class="btn">Сохранить</button>
+                <button type="button" class="btn btn-outline" onclick="closeModal('editAdminModal')">Отмена</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
-    // --- Инвайт-код: отображение в местном времени ---
-    function formatLocalTime(utcStr) {
-        const d = new Date(utcStr);
-        return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    }
+    // --- Invite code local time ---
     const expiresEl = document.getElementById('inviteExpires');
     if (expiresEl) {
         const utcStr = expiresEl.dataset.utc;
-        if (utcStr) expiresEl.textContent = formatLocalTime(utcStr);
+        if (utcStr) expiresEl.textContent = new Date(utcStr).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     }
-
     document.getElementById('generateInviteBtn').addEventListener('click', async () => {
         const resp = await fetch('/admin/generate_invite', { method: 'POST' });
         const data = await resp.json();
@@ -335,7 +487,7 @@
              <span class="invite-expires">до ${localTime}</span>`;
     });
 
-    // --- Вкладки ---
+    // --- Tabs ---
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -346,37 +498,65 @@
         });
     });
 
-    // --- Период кастомный (статистика) ---
+    // --- Period selectors ---
     document.getElementById('statsPeriod').addEventListener('change', function() {
-        const custom = document.getElementById('customRangeAdmin');
-        custom.style.display = this.value === 'custom' ? 'flex' : 'none';
+        document.getElementById('customRangeAdmin').style.display = this.value === 'custom' ? 'flex' : 'none';
         if (this.value !== 'custom') loadAllStats();
     });
-
-    // --- Период кастомный (отчёт) ---
     document.getElementById('reportPeriod').addEventListener('change', function() {
-        const monthInput = document.getElementById('reportMonth');
-        const customRange = document.getElementById('reportCustomRange');
-        monthInput.style.display = this.value === 'month' ? 'block' : 'none';
-        customRange.style.display = this.value === 'custom' ? 'flex' : 'none';
+        document.getElementById('reportMonth').style.display = this.value === 'month' ? 'block' : 'none';
+        document.getElementById('reportCustomRange').style.display = this.value === 'custom' ? 'flex' : 'none';
     });
 
-    // --- Модалки ---
+    // --- Modals ---
     function openAddUserModal() { document.getElementById('addUserModal').classList.add('active'); }
     function openAddTaskModal() { document.getElementById('addTaskModal').classList.add('active'); }
-    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
-
+    function openAddAdminModal() { document.getElementById('addAdminModal').classList.add('active'); }
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('active');
+        const rp = document.getElementById('revealedPassword');
+        if (rp) { rp.style.display = 'none'; rp.textContent = ''; }
+        const ap = document.getElementById('adminPasswordInput');
+        if (ap) ap.value = '';
+    }
     document.querySelectorAll('.modal').forEach(m => {
         m.addEventListener('click', e => { if (e.target === m) closeModal(m.id); });
     });
 
+    let currentEditUserId = null;
+
     function openEditUserModal(id, fname, lname, login, rate) {
+        currentEditUserId = id;
         document.getElementById('editUserForm').action = '/admin/edit_user/' + id;
         document.getElementById('editFName').value = fname;
         document.getElementById('editLName').value = lname;
         document.getElementById('editLogin').value = login;
         document.getElementById('editRate').value = rate;
+        document.getElementById('editUserIdBadge').textContent = 'ID: ' + id;
+        const rp = document.getElementById('revealedPassword');
+        rp.style.display = 'none'; rp.textContent = '';
+        document.getElementById('adminPasswordInput').value = '';
         document.getElementById('editUserModal').classList.add('active');
+    }
+
+    async function revealPassword() {
+        const adminPass = document.getElementById('adminPasswordInput').value;
+        if (!adminPass) { alert('Введите пароль администратора'); return; }
+        const resp = await fetch('/api/admin/reveal_password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentEditUserId, admin_password: adminPass })
+        });
+        const data = await resp.json();
+        const rpEl = document.getElementById('revealedPassword');
+        if (data.password) {
+            rpEl.textContent = 'Пароль: ' + data.password;
+            rpEl.style.display = 'block';
+        } else {
+            rpEl.textContent = data.error || 'Ошибка';
+            rpEl.style.display = 'block';
+            rpEl.classList.add('reveal-error');
+        }
     }
 
     function openEditTaskModal(id, title, deadline, userIds) {
@@ -391,14 +571,28 @@
         document.getElementById('editTaskModal').classList.add('active');
     }
 
-    // --- Сессии ---
-    async function openSessionsModal(uid) {
+    function openEditAdminModal(id, fname, lname, login, perms) {
+        document.getElementById('editAdminForm').action = '/admin/edit_admin/' + id;
+        document.getElementById('editAdminFName').value = fname;
+        document.getElementById('editAdminLName').value = lname;
+        document.getElementById('editAdminLogin').value = login;
+        const permList = perms ? perms.split(',') : [];
+        ['tasks', 'profiles', 'org'].forEach(p => {
+            const cb = document.getElementById('editPerm_' + p);
+            if (cb) cb.checked = permList.includes(p);
+        });
+        document.getElementById('editAdminModal').classList.add('active');
+    }
+
+    // --- Sessions ---
+    async function openSessionsModal(uid, name) {
+        document.getElementById('sessionsModalTitle').textContent = 'Сессии: ' + name;
         const resp = await fetch(`/api/admin/user_sessions/${uid}`);
         const sessions = await resp.json();
         const list = document.getElementById('sessionsList');
         list.innerHTML = '';
         if (!sessions.length) {
-            list.innerHTML = '<p class="text-secondary" style="padding:16px;">Нет данных</p>';
+            list.innerHTML = '<p class="text-secondary" style="padding:16px 0;">Нет данных</p>';
         }
         sessions.forEach(s => {
             const div = document.createElement('div');
@@ -410,20 +604,20 @@
                     ${s.manual ? `<span class="badge badge-warn">корректировка</span>` : ''}
                     ${s.reason ? `<span class="text-secondary" style="font-size:0.8rem;">${s.reason}</span>` : ''}
                 </div>
-                ${s.manual ? `<button class="btn btn-sm btn-outline btn-danger" onclick="deleteAdjustment(${s.id})">Удалить</button>` : ''}
+                ${s.manual ? `<button class="btn btn-sm btn-outline btn-danger" onclick="deleteAdjustment(${s.id}, ${uid}, '${name}')">Удалить</button>` : ''}
             `;
             list.appendChild(div);
         });
         document.getElementById('sessionsModal').classList.add('active');
     }
 
-    async function deleteAdjustment(sid) {
+    async function deleteAdjustment(sid, uid, name) {
         if (!confirm('Удалить корректировку?')) return;
         await fetch(`/api/admin/delete_adjustment/${sid}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-        closeModal('sessionsModal');
+        openSessionsModal(uid, name);
     }
 
-    // --- Статистика ---
+    // --- Stats ---
     const charts = {};
     async function loadAllStats() {
         const period = document.getElementById('statsPeriod').value;
@@ -438,50 +632,34 @@
         const data = await resp.json();
         const grid = document.getElementById('statsGrid');
         grid.innerHTML = '';
-
         Object.values(charts).forEach(c => c.destroy());
-
         data.forEach(u => {
             const card = document.createElement('div');
             card.className = 'employee-card';
             card.innerHTML = `
                 <div class="employee-card__header">
-                    <h3>${u.name}</h3>
-                    <a href="/admin/view_user/${u.id}" class="btn btn-sm btn-outline">Кабинет</a>
+                    <div>
+                        <div style="font-weight:600;">${u.name}</div>
+                        <div class="text-secondary" style="font-size:0.78rem;">ID ${u.id}</div>
+                    </div>
                 </div>
                 <div class="chart-wrap"><canvas id="chart-${u.id}"></canvas></div>
                 <div class="employee-card__stats">
                     <div class="stat-item"><span class="stat-label">Часов</span><span class="stat-value">${u.total_hours}</span></div>
-                    <div class="stat-item"><span class="stat-label">Заработано</span><span class="stat-value accent">${u.earnings.toLocaleString('ru')} ₽</span></div>
+                    <div class="stat-item"><span class="stat-label">Заработано</span><span class="stat-value accent">${Number(u.earnings).toLocaleString('ru')} ₽</span></div>
                 </div>
             `;
             grid.appendChild(card);
             charts[u.id] = new Chart(document.getElementById(`chart-${u.id}`), {
                 type: 'bar',
-                data: {
-                    labels: u.labels,
-                    datasets: [{
-                        label: 'Часы',
-                        data: u.values,
-                        backgroundColor: 'rgba(0,122,255,0.7)',
-                        borderRadius: 6,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { beginAtZero: true, grid: { color: '#f0f0f5' } },
-                        x: { grid: { display: false }, ticks: { maxRotation: 45 } }
-                    }
-                }
+                data: { labels: u.labels, datasets: [{ label: 'Часы', data: u.values, backgroundColor: 'rgba(0,122,255,0.75)', borderRadius: 5, borderSkipped: false }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                           scales: { y: { beginAtZero: true, grid: { color: '#f0f0f5' } }, x: { grid: { display: false }, ticks: { maxRotation: 45 } } } }
             });
         });
     }
 
-    // --- Скачать сводку ---
+    // --- Report download ---
     document.getElementById('downloadReportBtn').addEventListener('click', () => {
         const period = document.getElementById('reportPeriod').value;
         let url = `/api/admin/report?period=${period}`;
@@ -498,17 +676,13 @@
         window.location.href = url;
     });
 
-    document.getElementById('statsPeriod').addEventListener('change', () => {
-        if (document.getElementById('statsPeriod').value !== 'custom') loadAllStats();
-    });
-
-    // --- Поиск ---
-    document.getElementById('employeeSearch').addEventListener('input', e => {
+    // --- Search ---
+    document.getElementById('employeeSearch')?.addEventListener('input', e => {
         const f = e.target.value.toLowerCase();
         document.querySelectorAll('#employeesTable tbody tr').forEach(r =>
             r.style.display = r.textContent.toLowerCase().includes(f) ? '' : 'none');
     });
-    document.getElementById('taskSearch').addEventListener('input', e => {
+    document.getElementById('taskSearch')?.addEventListener('input', e => {
         const f = e.target.value.toLowerCase();
         document.querySelectorAll('#tasksTable tbody tr').forEach(r =>
             r.style.display = r.textContent.toLowerCase().includes(f) ? '' : 'none');
