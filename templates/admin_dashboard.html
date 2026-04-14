@@ -21,7 +21,7 @@
                 <span id="inviteCodeDisplay">
                     {% if org.invite_code and org.invite_code_expires > now %}
                         <strong class="invite-code-text">{{ org.invite_code }}</strong>
-                        <span class="invite-expires">до <span id="inviteExpires" data-utc="{{ org.invite_code_expires.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ org.invite_code_expires.strftime('%H:%M') }}</span></span>
+                        <span class="invite-expires"><span id="inviteExpires" data-utc="{{ org.invite_code_expires.strftime('%Y-%m-%dT%H:%M:%SZ') }}">...</span></span>
                     {% else %}
                         <span class="invite-inactive">не активен</span>
                     {% endif %}
@@ -58,7 +58,6 @@
                 <select id="statsPeriod" class="form-control form-control--sm">
                     <option value="week">Эта неделя</option>
                     <option value="month">Этот месяц</option>
-                    <option value="quarter">Этот квартал</option>
                     <option value="year">Этот год</option>
                     <option value="alltime">Всё время</option>
                     <option value="custom">Произвольный период</option>
@@ -73,7 +72,6 @@
                     <select id="reportPeriod" class="form-control form-control--sm">
                         <option value="week">Неделя</option>
                         <option value="month" selected>Месяц</option>
-                        <option value="quarter">Квартал</option>
                         <option value="year">Год</option>
                         <option value="alltime">Всё время</option>
                         <option value="custom">Произвольный</option>
@@ -83,9 +81,7 @@
                         <input type="date" id="reportStart" class="form-control form-control--sm">
                         <input type="date" id="reportEnd" class="form-control form-control--sm">
                     </div>
-                    <button class="btn btn-sm" id="downloadReportBtn">
-                        <img src="/static/icons/done.png" alt=""> Скачать сводку
-                    </button>
+                    <button class="btn btn-sm" id="downloadReportBtn">Скачать сводку</button>
                 </div>
             </div>
         </div>
@@ -470,21 +466,46 @@
 </div>
 
 <script>
-    // --- Invite code local time ---
+    // --- Invite code: "осталось X мин" countdown ---
+    let _inviteExpiresMs = null;
+    let _inviteTimerHandle = null;
+
+    function fmtRemaining(expiresMs) {
+        const rem = Math.max(0, Math.round((expiresMs - Date.now()) / 60000));
+        if (rem === 0) return 'истекает';
+        return `осталось ${rem} мин`;
+    }
+
+    function startInviteCountdown(expiresMs) {
+        _inviteExpiresMs = expiresMs;
+        if (_inviteTimerHandle) clearInterval(_inviteTimerHandle);
+        const update = () => {
+            const el = document.getElementById('inviteExpires');
+            if (!el) { clearInterval(_inviteTimerHandle); return; }
+            el.textContent = fmtRemaining(_inviteExpiresMs);
+            if (Date.now() >= _inviteExpiresMs) {
+                clearInterval(_inviteTimerHandle);
+                document.getElementById('inviteCodeDisplay').innerHTML =
+                    '<span class="invite-inactive">не активен</span>';
+            }
+        };
+        update();
+        _inviteTimerHandle = setInterval(update, 30000);
+    }
+
     const expiresEl = document.getElementById('inviteExpires');
     if (expiresEl) {
         const utcStr = expiresEl.dataset.utc;
-        if (utcStr) expiresEl.textContent = new Date(utcStr).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        if (utcStr) startInviteCountdown(new Date(utcStr).getTime());
     }
+
     document.getElementById('generateInviteBtn').addEventListener('click', async () => {
         const resp = await fetch('/admin/generate_invite', { method: 'POST' });
         const data = await resp.json();
-        const localTime = data.expires_ts
-            ? new Date(data.expires_ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-            : data.expires;
         document.getElementById('inviteCodeDisplay').innerHTML =
             `<strong class="invite-code-text">${data.invite_code}</strong>
-             <span class="invite-expires">до ${localTime}</span>`;
+             <span class="invite-expires"><span id="inviteExpires">...</span></span>`;
+        if (data.expires_ts) startInviteCountdown(data.expires_ts);
     });
 
     // --- Tabs ---
