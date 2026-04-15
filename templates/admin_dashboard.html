@@ -393,12 +393,35 @@
 
 <!-- Модал: история сессий -->
 <div id="sessionsModal" class="modal">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width:560px;">
         <div class="modal-header">
             <h2 id="sessionsModalTitle">История сессий</h2>
             <button class="modal-close" onclick="closeModal('sessionsModal')">&#10005;</button>
         </div>
-        <div id="sessionsList"></div>
+        <div id="sessionsList" style="max-height:220px; overflow-y:auto; margin-bottom:16px;"></div>
+        <div style="border-top:1px solid var(--border-light); padding-top:16px;">
+            <div class="section-label" style="margin-bottom:12px;">Корректировка времени</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                <button class="btn btn-sm btn-outline" onclick="quickAdj(60)">+1 ч</button>
+                <button class="btn btn-sm btn-outline" onclick="quickAdj(120)">+2 ч</button>
+                <button class="btn btn-sm btn-outline" onclick="quickAdj(30)">+30 мин</button>
+                <button class="btn btn-sm btn-outline" onclick="quickAdj(-60)" style="color:#dc3545; border-color:#dc3545;">-1 ч</button>
+                <button class="btn btn-sm btn-outline" onclick="quickAdj(-120)" style="color:#dc3545; border-color:#dc3545;">-2 ч</button>
+                <button class="btn btn-sm btn-outline" onclick="quickAdj(-30)" style="color:#dc3545; border-color:#dc3545;">-30 мин</button>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+                <select id="adjSign" class="form-control form-control--sm" style="width:60px;">
+                    <option value="1">+</option><option value="-1">−</option>
+                </select>
+                <input type="number" id="adjHours" class="form-control form-control--sm" value="0" min="0" max="24" style="width:70px;" placeholder="ч">
+                <span style="color:var(--text-secondary);">ч</span>
+                <input type="number" id="adjMinutes" class="form-control form-control--sm" value="0" min="0" max="59" style="width:70px;" placeholder="мин">
+                <span style="color:var(--text-secondary);">мин</span>
+                <input type="date" id="adjDate" class="form-control form-control--sm">
+                <button class="btn btn-sm" onclick="applyCustomAdj()">Применить</button>
+            </div>
+            <input type="text" id="adjReason" class="form-control" placeholder="Причина (необязательно)" style="margin-bottom:0;">
+        </div>
         <div class="modal-actions" style="margin-top:16px;">
             <button class="btn btn-outline" onclick="closeModal('sessionsModal')">Закрыть</button>
         </div>
