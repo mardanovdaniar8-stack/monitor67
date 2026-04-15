@@ -19,6 +19,7 @@ class Organization(db.Model):
     name = db.Column(db.String(100), nullable=False)
     invite_code = db.Column(db.String(10), unique=True, nullable=True)
     invite_code_expires = db.Column(db.DateTime, nullable=True)
+    test_data_loaded = db.Column(db.Boolean, default=False)
     users = db.relationship('User', backref='organization', lazy=True)
     tasks = db.relationship('Task', backref='organization', lazy=True)
 
@@ -128,6 +129,11 @@ def run_migrations():
     with db.engine.connect() as conn:
         try:
             conn.execute(text('ALTER TABLE user ADD COLUMN permissions VARCHAR(200)'))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text('ALTER TABLE organization ADD COLUMN test_data_loaded BOOLEAN DEFAULT 0'))
             conn.commit()
         except Exception:
             pass
@@ -293,7 +299,31 @@ def admin_seed_test_data():
     admin = User.query.get(session['user_id'])
     if not org or admin.permissions != '*':
         return redirect(url_for('admin_panel', error='Только суперадмин может загрузить тестовые данные.'))
+    if org.test_data_loaded:
+        return redirect(url_for('admin_panel', error='Тестовые данные уже загружены.'))
     _seed_employees_and_data(org)
+    org.test_data_loaded = True
+    db.session.commit()
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/delete_test_data', methods=['POST'])
+def admin_delete_test_data():
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+    org = get_current_organization()
+    admin = User.query.get(session['user_id'])
+    if not org or admin.permissions != '*':
+        return redirect(url_for('admin_panel', error='Только суперадмин может удалить тестовые данные.'))
+    users_to_delete = User.query.filter_by(organization_id=org.id, role='user').all()
+    for u in users_to_delete:
+        WorkSession.query.filter_by(user_id=u.id).delete()
+        TaskCompletion.query.filter_by(user_id=u.id).delete()
+        for t in list(u.tasks):
+            t.users.remove(u)
+        db.session.delete(u)
+    Task.query.filter_by(organization_id=org.id).delete()
+    org.test_data_loaded = False
+    db.session.commit()
     return redirect(url_for('admin_panel'))
 
 # ---------- Employee routes ----------
@@ -589,7 +619,6 @@ def get_stats():
 
 @app.route('/api/user/full_stats')
 def user_full_stats():
-    """Расширенная статистика для клиента (с графиком)"""
     user_id = request.args.get('user_id')
     period = request.args.get('period', 'week')
     if not user_id:
@@ -778,30 +807,34 @@ def mark_task_done_api(task_id):
         return jsonify({"status": "ok"})
     return jsonify({"error": "completion record not found"}), 404
 
-@app.route('/api/admin/adjust_time', methods=['POST'])
-def admin_adjust_time():
-    data = request.json
-    user_id = data.get('user_id')
-    minutes = data.get('minutes')
-    reason = data.get('reason', '')
-    admin_login = data.get('admin_login')
-    admin_password = data.get('admin_password')
-    if not all([user_id, minutes is not None, admin_login, admin_password]):
-        return jsonify({"error": "missing data"}), 400
-    admin = User.query.filter_by(login=admin_login, password=admin_password).first()
+@app.route('/api/admin/adjust_time_web', methods=['POST'])
+def admin_adjust_time_web():
+    if 'user_id' not in session:
+        return jsonify({"error": "unauthorized"}), 401
+    admin = User.query.get(session['user_id'])
     if not admin or admin.role != 'admin':
         return jsonify({"error": "forbidden"}), 403
+    data = request.json or {}
+    user_id = data.get('user_id')
+    minutes = data.get('minutes')
+    adj_date_str = data.get('date')
+    if not user_id or minutes is None:
+        return jsonify({"error": "missing data"}), 400
     u = User.query.get(user_id)
     if not u or u.organization_id != admin.organization_id:
         return jsonify({"error": "user not found"}), 404
-    ws = WorkSession.query.filter_by(user_id=user_id, date=date.today()).first()
+    try:
+        adj_date = date.fromisoformat(adj_date_str) if adj_date_str else date.today()
+    except Exception:
+        adj_date = date.today()
+    ws = WorkSession.query.filter_by(user_id=user_id, date=adj_date).first()
     if not ws:
-        ws = WorkSession(user_id=user_id, date=date.today(), duration_minutes=0)
+        ws = WorkSession(user_id=user_id, date=adj_date, duration_minutes=0)
         db.session.add(ws)
-    ws.duration_minutes = max(0, ws.duration_minutes + minutes)
+    new_duration = max(0, ws.duration_minutes + minutes)
+    ws.duration_minutes = new_duration
     ws.manual_adjustment = True
     ws.adjusted_by = admin.id
-    ws.adjust_reason = reason
     db.session.commit()
     return jsonify({"status": "ok", "new_total": ws.duration_minutes})
 
