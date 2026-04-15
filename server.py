@@ -30,9 +30,6 @@ class User(db.Model):
     password = db.Column(db.String(50))
     hourly_rate = db.Column(db.Float, default=0)
     role = db.Column(db.String(10), default='user')
-    # '*' = superadmin (full access + can manage admins)
-    # 'tasks,profiles,org' = sub-admin with specific rights
-    # None = regular employee
     permissions = db.Column(db.String(200), nullable=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organization.id'))
     __table_args__ = (db.UniqueConstraint('login', 'organization_id', name='_user_login_org_uc'),)
@@ -80,7 +77,6 @@ def is_superadmin(user):
     return user is not None and user.role == 'admin' and user.permissions == '*'
 
 def has_perm(user, perm):
-    """Check if admin user has specific permission."""
     if user is None or user.role != 'admin':
         return False
     if user.permissions == '*':
@@ -129,7 +125,6 @@ def get_period_bounds(period, custom_start=None, custom_end=None):
     return start, end
 
 def run_migrations():
-    """Safely add new columns to existing database."""
     with db.engine.connect() as conn:
         try:
             conn.execute(text('ALTER TABLE user ADD COLUMN permissions VARCHAR(200)'))
@@ -138,7 +133,6 @@ def run_migrations():
             pass
 
 def _seed_employees_and_data(org):
-    """Seed test employees, sessions, and tasks into an existing org."""
     import random
     employees_data = [
         ('Александр', 'Петров',   'petrov',    'pass1', 350.0),
@@ -154,7 +148,6 @@ def _seed_employees_and_data(org):
     ]
     employees = []
     for fn, ln, login, pw, rate in employees_data:
-        # skip if login already exists in org
         if User.query.filter_by(login=login, organization_id=org.id).first():
             continue
         u = User(first_name=fn, last_name=ln, login=login,
@@ -207,21 +200,6 @@ def _seed_employees_and_data(org):
             db.session.add(TaskCompletion(task_id=t.id, user_id=emp.id, completed=False))
     db.session.commit()
     return employees
-
-def seed_test_db():
-    existing = Organization.query.filter_by(name='Ромашка').first()
-    if existing:
-        return existing
-    org = Organization(name='Ромашка')
-    db.session.add(org)
-    db.session.flush()
-    admin = User(first_name='Директор', last_name='Иванов', login='admin',
-                 password='admin123', hourly_rate=0, role='admin',
-                 permissions='*', organization_id=org.id)
-    db.session.add(admin)
-    db.session.flush()
-    _seed_employees_and_data(org)
-    return org
 
 # ---------- Auth ----------
 @app.route('/register', methods=['GET', 'POST'])
@@ -317,38 +295,6 @@ def admin_seed_test_data():
         return redirect(url_for('admin_panel', error='Только суперадмин может загрузить тестовые данные.'))
     _seed_employees_and_data(org)
     return redirect(url_for('admin_panel'))
-
-@app.route('/api/admin/adjust_time_web', methods=['POST'])
-def admin_adjust_time_web():
-    if 'user_id' not in session:
-        return jsonify({"error": "unauthorized"}), 401
-    admin = User.query.get(session['user_id'])
-    if not admin or admin.role != 'admin':
-        return jsonify({"error": "forbidden"}), 403
-    data = request.json or {}
-    user_id = data.get('user_id')
-    minutes = data.get('minutes')
-    reason = data.get('reason', '')
-    adj_date_str = data.get('date')
-    if not user_id or minutes is None:
-        return jsonify({"error": "missing data"}), 400
-    u = User.query.get(user_id)
-    if not u or u.organization_id != admin.organization_id:
-        return jsonify({"error": "user not found"}), 404
-    try:
-        adj_date = date.fromisoformat(adj_date_str) if adj_date_str else date.today()
-    except Exception:
-        adj_date = date.today()
-    ws = WorkSession.query.filter_by(user_id=user_id, date=adj_date).first()
-    if not ws:
-        ws = WorkSession(user_id=user_id, date=adj_date, duration_minutes=0)
-        db.session.add(ws)
-    ws.duration_minutes = max(0, ws.duration_minutes + minutes)
-    ws.manual_adjustment = True
-    ws.adjusted_by = admin.id
-    ws.adjust_reason = reason
-    db.session.commit()
-    return jsonify({"status": "ok", "new_total": ws.duration_minutes})
 
 # ---------- Employee routes ----------
 @app.route('/admin/add_user', methods=['POST'])
@@ -641,6 +587,42 @@ def get_stats():
     return jsonify({"labels": labels, "values": values, "total_hours": round(total_hours, 2),
                     "earnings": round(earnings, 2), "rate": user.hourly_rate})
 
+@app.route('/api/user/full_stats')
+def user_full_stats():
+    """Расширенная статистика для клиента (с графиком)"""
+    user_id = request.args.get('user_id')
+    period = request.args.get('period', 'week')
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+    u = User.query.get(int(user_id))
+    if not u:
+        return jsonify({"error": "not found"}), 404
+    start, end = get_period_bounds(period)
+    sessions = WorkSession.query.filter(WorkSession.user_id == u.id, WorkSession.date >= start, WorkSession.date <= end).all()
+    total_min = sum(s.duration_minutes for s in sessions)
+    total_hours = total_min / 60
+    earnings = total_hours * u.hourly_rate
+
+    if (end - start).days > 90:
+        labels, values = [], []
+        current = start.replace(day=1)
+        while current <= end:
+            month_min = sum(s.duration_minutes for s in sessions if s.date.year == current.year and s.date.month == current.month)
+            labels.append(current.strftime('%b %Y'))
+            values.append(round(month_min / 60, 2))
+            current = current.replace(month=current.month % 12 + 1, year=current.year + (1 if current.month == 12 else 0))
+    else:
+        labels, values = [], []
+        current = start
+        while current <= end:
+            day_min = sum(s.duration_minutes for s in sessions if s.date == current)
+            labels.append(current.strftime('%d.%m'))
+            values.append(round(day_min / 60, 2))
+            current += timedelta(days=1)
+
+    return jsonify({"labels": labels, "values": values, "total_hours": round(total_hours, 2),
+                    "earnings": round(earnings, 2), "rate": u.hourly_rate})
+
 @app.route('/api/admin/all_stats')
 def admin_all_stats():
     if 'user_id' not in session:
@@ -696,7 +678,6 @@ def check_invite():
 
 @app.route('/api/admin/verify', methods=['POST'])
 def api_admin_verify():
-    """Client-side admin credential check. Returns role='admin' on success."""
     d = request.json or {}
     org_id = d.get('org_id')
     login = d.get('login')
@@ -900,53 +881,6 @@ def total_minutes():
     sessions = WorkSession.query.filter_by(user_id=user_id, date=date.today()).all()
     return jsonify({"total_min": sum(s.duration_minutes for s in sessions)})
 
-@app.route('/api/stats')
-def user_stats_api():
-    user_id = request.args.get('user_id')
-    period = request.args.get('period', 'week')
-    if not user_id:
-        return jsonify({"error": "user_id required"}), 400
-    u = User.query.get(int(user_id))
-    if not u:
-        return jsonify({"error": "not found"}), 404
-    today = date.today()
-    if period == 'week':
-        start = today - timedelta(days=6)
-        days = [(start + timedelta(days=i)) for i in range(7)]
-        labels = [d.strftime('%d.%m') for d in days]
-        values = []
-        for d in days:
-            s = WorkSession.query.filter_by(user_id=u.id, date=d).first()
-            values.append(round((s.duration_minutes if s else 0) / 60, 2))
-    elif period == 'month':
-        start = today - timedelta(days=29)
-        days = [(start + timedelta(days=i)) for i in range(30)]
-        labels = [d.strftime('%d.%m') for d in days]
-        values = []
-        for d in days:
-            s = WorkSession.query.filter_by(user_id=u.id, date=d).first()
-            values.append(round((s.duration_minutes if s else 0) / 60, 2))
-    elif period == 'year':
-        months = []
-        for i in range(11, -1, -1):
-            m = today.replace(day=1) - timedelta(days=i * 30)
-            months.append((m.year, m.month))
-        labels = [f"{m[1]:02d}.{m[0]}" for m in months]
-        values = []
-        for yr, mo in months:
-            sessions = WorkSession.query.filter(
-                WorkSession.user_id == u.id,
-                db.extract('year', WorkSession.date) == yr,
-                db.extract('month', WorkSession.date) == mo
-            ).all()
-            values.append(round(sum(s.duration_minutes for s in sessions) / 60, 2))
-    else:
-        labels, values = [], []
-    total_min = sum(v * 60 for v in values)
-    return jsonify({"labels": labels, "values": values,
-                    "total_hours": round(sum(values), 2),
-                    "total_earnings": round(sum(values) * u.hourly_rate, 2)})
-
 @app.route('/api/admin/report')
 def download_report():
     if 'user_id' not in session:
@@ -1006,10 +940,6 @@ def download_report():
     filename = f"report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-@app.route('/api/admin/monthly_report')
-def monthly_report():
-    return download_report()
 
 if __name__ == '__main__':
     with app.app_context():
