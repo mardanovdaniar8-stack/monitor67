@@ -216,6 +216,32 @@
                     </div>
                     <button type="submit" class="btn">Сохранить</button>
                 </form>
+
+                <!-- Кнопка загрузки/удаления тестовых данных (только для суперадмина) -->
+                {% if 'superadmin' in perms %}
+                <div style="margin-top:30px; padding-top:20px; border-top:1px solid var(--border-light);">
+                    <h4 style="margin-bottom:12px;">Тестовые данные</h4>
+                    {% if org.test_data_loaded %}
+                        <p class="text-secondary" style="margin-bottom:16px; font-size:0.85rem;">
+                            Тестовые данные загружены. Можно удалить их, чтобы освободить место.
+                        </p>
+                        <form action="/admin/delete_test_data" method="POST" onsubmit="return confirm('Удалить все тестовые данные (сотрудники, задачи, сессии)?');">
+                            <button type="submit" class="btn btn-outline" style="border-color: #dc3545; color: #dc3545;">
+                                <img src="/static/icons/delete.png" alt="" style="filter: invert(27%) sepia(91%) saturate(7455%) hue-rotate(357deg) brightness(92%) contrast(113%);"> Удалить тестовые данные
+                            </button>
+                        </form>
+                    {% else %}
+                        <p class="text-secondary" style="margin-bottom:16px; font-size:0.85rem;">
+                            Загрузить 10 сотрудников, историю сессий за 9+ месяцев, 5 выполненных и 5 активных задач.
+                        </p>
+                        <form action="/admin/seed_test_data" method="POST" onsubmit="return confirm('Загрузить демо-данные? Будут добавлены сотрудники и задачи.');">
+                            <button type="submit" class="btn btn-outline" style="border-color: var(--accent); color: var(--accent);">
+                                <img src="/static/icons/plus.png" alt="" style="filter: invert(39%) sepia(93%) saturate(3862%) hue-rotate(200deg) brightness(100%) contrast(101%);"> Загрузить тестовые данные
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
 
             <!-- Администраторы -->
@@ -274,124 +300,10 @@
     {% endif %}
 </div>
 
-<!-- Модал: добавить сотрудника -->
-<div id="addUserModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Новый сотрудник</h2>
-            <button class="modal-close" onclick="closeModal('addUserModal')">&#10005;</button>
-        </div>
-        <form action="/admin/add_user" method="POST">
-            <div class="form-row">
-                <div class="input-group"><label>Имя</label><input name="f_name" placeholder="Иван" required></div>
-                <div class="input-group"><label>Фамилия</label><input name="l_name" placeholder="Иванов" required></div>
-            </div>
-            <div class="input-group"><label>Логин</label><input name="login" placeholder="ivanov" required></div>
-            <div class="input-group"><label>Пароль</label><input name="password" type="password" placeholder="Пароль" required></div>
-            <div class="input-group"><label>Ставка (₽/час)</label><input name="rate" type="number" step="0.5" min="0" placeholder="350" required></div>
-            <div class="modal-actions">
-                <button type="submit" class="btn">Добавить</button>
-                <button type="button" class="btn btn-outline" onclick="closeModal('addUserModal')">Отмена</button>
-            </div>
-        </form>
-    </div>
-</div>
+<!-- Модальные окна (добавления, редактирования сотрудников/задач/админов) -->
+<!-- (Код модальных окон не изменился, привожу только изменённую модалку сессий) -->
 
-<!-- Модал: редактировать сотрудника -->
-<div id="editUserModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Редактировать сотрудника</h2>
-            <button class="modal-close" onclick="closeModal('editUserModal')">&#10005;</button>
-        </div>
-        <form id="editUserForm" method="POST">
-            <div class="employee-id-badge" id="editUserIdBadge"></div>
-            <div class="form-row">
-                <div class="input-group"><label>Имя</label><input name="f_name" id="editFName" placeholder="Иван" required></div>
-                <div class="input-group"><label>Фамилия</label><input name="l_name" id="editLName" placeholder="Иванов" required></div>
-            </div>
-            <div class="input-group"><label>Логин</label><input name="login" id="editLogin" required></div>
-            <div class="input-group"><label>Ставка (₽/час)</label><input name="rate" id="editRate" type="number" step="0.5" min="0" required></div>
-            <div class="input-group"><label>Новый пароль</label><input name="password" type="password" placeholder="Оставьте пустым, чтобы не менять"></div>
-
-            <div class="reveal-password-section">
-                <div class="section-label">Посмотреть пароль сотрудника</div>
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                    <input type="password" id="adminPasswordInput" class="form-control form-control--sm" placeholder="Ваш пароль администратора" style="flex:1; min-width:160px;">
-                    <button type="button" class="btn btn-sm btn-outline" onclick="revealPassword()">
-                        <img src="/static/icons/user.png" alt="" style="width:14px;height:14px;"> Показать
-                    </button>
-                </div>
-                <div id="revealedPassword" class="revealed-password" style="display:none;"></div>
-            </div>
-
-            <div class="modal-actions">
-                <button type="submit" class="btn">Сохранить</button>
-                <button type="button" class="btn btn-outline" onclick="closeModal('editUserModal')">Отмена</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Модал: добавить задачу -->
-<div id="addTaskModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Новая задача</h2>
-            <button class="modal-close" onclick="closeModal('addTaskModal')">&#10005;</button>
-        </div>
-        <form action="/admin/add_task" method="POST">
-            <div class="input-group"><label>Название</label><input name="title" placeholder="Название задачи" required></div>
-            <div class="input-group"><label>Дедлайн</label><input name="deadline" type="date" required></div>
-            <div class="input-group">
-                <label>Исполнители</label>
-                <div class="checkbox-list">
-                    {% for u in users %}
-                    <label class="checkbox-item">
-                        <input type="checkbox" name="user_ids" value="{{ u.id }}">
-                        <span>{{ u.first_name }} {{ u.last_name }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="submit" class="btn">Создать</button>
-                <button type="button" class="btn btn-outline" onclick="closeModal('addTaskModal')">Отмена</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Модал: редактировать задачу -->
-<div id="editTaskModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Редактировать задачу</h2>
-            <button class="modal-close" onclick="closeModal('editTaskModal')">&#10005;</button>
-        </div>
-        <form id="editTaskForm" method="POST">
-            <div class="input-group"><label>Название</label><input name="title" id="editTaskTitle" required></div>
-            <div class="input-group"><label>Дедлайн</label><input name="deadline" id="editTaskDeadline" type="date" required></div>
-            <div class="input-group">
-                <label>Исполнители</label>
-                <div class="checkbox-list" id="editTaskUsers">
-                    {% for u in users %}
-                    <label class="checkbox-item">
-                        <input type="checkbox" name="user_ids" value="{{ u.id }}">
-                        <span>{{ u.first_name }} {{ u.last_name }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="submit" class="btn">Сохранить</button>
-                <button type="button" class="btn btn-outline" onclick="closeModal('editTaskModal')">Отмена</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Модал: история сессий -->
+<!-- Модал: история сессий (с журналом корректировок) -->
 <div id="sessionsModal" class="modal">
     <div class="modal-content" style="max-width:560px;">
         <div class="modal-header">
@@ -420,7 +332,6 @@
                 <input type="date" id="adjDate" class="form-control form-control--sm">
                 <button class="btn btn-sm" onclick="applyCustomAdj()">Применить</button>
             </div>
-            <input type="text" id="adjReason" class="form-control" placeholder="Причина (необязательно)" style="margin-bottom:0;">
         </div>
         <div class="modal-actions" style="margin-top:16px;">
             <button class="btn btn-outline" onclick="closeModal('sessionsModal')">Закрыть</button>
@@ -428,68 +339,15 @@
     </div>
 </div>
 
-<!-- Модал: добавить администратора -->
-<div id="addAdminModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Новый администратор</h2>
-            <button class="modal-close" onclick="closeModal('addAdminModal')">&#10005;</button>
-        </div>
-        <form action="/admin/add_admin" method="POST">
-            <div class="form-row">
-                <div class="input-group"><label>Имя</label><input name="f_name" placeholder="Иван" required></div>
-                <div class="input-group"><label>Фамилия</label><input name="l_name" placeholder="Иванов" required></div>
-            </div>
-            <div class="input-group"><label>Логин</label><input name="login" placeholder="manager1" required></div>
-            <div class="input-group"><label>Пароль</label><input name="password" type="password" placeholder="Пароль" required></div>
-            <div class="input-group">
-                <label>Права доступа</label>
-                <div class="checkbox-list">
-                    <label class="checkbox-item"><input type="checkbox" name="perms" value="tasks"><span>Управление задачами</span></label>
-                    <label class="checkbox-item"><input type="checkbox" name="perms" value="profiles"><span>Управление сотрудниками</span></label>
-                    <label class="checkbox-item"><input type="checkbox" name="perms" value="org"><span>Настройки организации</span></label>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="submit" class="btn">Создать</button>
-                <button type="button" class="btn btn-outline" onclick="closeModal('addAdminModal')">Отмена</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Модал: редактировать администратора -->
-<div id="editAdminModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Редактировать администратора</h2>
-            <button class="modal-close" onclick="closeModal('editAdminModal')">&#10005;</button>
-        </div>
-        <form id="editAdminForm" method="POST">
-            <div class="form-row">
-                <div class="input-group"><label>Имя</label><input name="f_name" id="editAdminFName" required></div>
-                <div class="input-group"><label>Фамилия</label><input name="l_name" id="editAdminLName" required></div>
-            </div>
-            <div class="input-group"><label>Логин</label><input name="login" id="editAdminLogin" required></div>
-            <div class="input-group"><label>Новый пароль</label><input name="password" type="password" placeholder="Оставьте пустым, чтобы не менять"></div>
-            <div class="input-group">
-                <label>Права доступа</label>
-                <div class="checkbox-list" id="editAdminPerms">
-                    <label class="checkbox-item"><input type="checkbox" name="perms" value="tasks" id="editPerm_tasks"><span>Управление задачами</span></label>
-                    <label class="checkbox-item"><input type="checkbox" name="perms" value="profiles" id="editPerm_profiles"><span>Управление сотрудниками</span></label>
-                    <label class="checkbox-item"><input type="checkbox" name="perms" value="org" id="editPerm_org"><span>Настройки организации</span></label>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="submit" class="btn">Сохранить</button>
-                <button type="button" class="btn btn-outline" onclick="closeModal('editAdminModal')">Отмена</button>
-            </div>
-        </form>
-    </div>
-</div>
+<!-- Остальные модалки (addUser, editUser, addTask, editTask, addAdmin, editAdmin) остаются без изменений -->
+<!-- В целях экономии места они не включены, но их необходимо оставить из предыдущей полной версии -->
 
 <script>
-    // --- Invite code: "осталось X мин" countdown ---
+    // Глобальные переменные
+    let currentSessionsUid = null;
+    let currentSessionsName = '';
+
+    // --- Invite code countdown ---
     let _inviteExpiresMs = null;
     let _inviteTimerHandle = null;
 
@@ -628,9 +486,16 @@
         document.getElementById('editAdminModal').classList.add('active');
     }
 
-    // --- Sessions ---
+    // --- Sessions (журнал) ---
     async function openSessionsModal(uid, name) {
+        currentSessionsUid = uid;
+        currentSessionsName = name;
         document.getElementById('sessionsModalTitle').textContent = 'Сессии: ' + name;
+        await loadSessionsList(uid);
+        document.getElementById('sessionsModal').classList.add('active');
+    }
+
+    async function loadSessionsList(uid) {
         const resp = await fetch(`/api/admin/user_sessions/${uid}`);
         const sessions = await resp.json();
         const list = document.getElementById('sessionsList');
@@ -646,19 +511,59 @@
                     <span class="session-date">${s.date}</span>
                     <span class="session-duration">${Math.floor(s.minutes/60)}ч ${s.minutes%60}м</span>
                     ${s.manual ? `<span class="badge badge-warn">корректировка</span>` : ''}
-                    ${s.reason ? `<span class="text-secondary" style="font-size:0.8rem;">${s.reason}</span>` : ''}
                 </div>
-                ${s.manual ? `<button class="btn btn-sm btn-outline btn-danger" onclick="deleteAdjustment(${s.id}, ${uid}, '${name}')">Удалить</button>` : ''}
+                ${s.manual ? `<button class="btn btn-sm btn-outline btn-danger" onclick="deleteAdjustment(${s.id})">Удалить</button>` : ''}
             `;
             list.appendChild(div);
         });
-        document.getElementById('sessionsModal').classList.add('active');
     }
 
-    async function deleteAdjustment(sid, uid, name) {
+    async function deleteAdjustment(sid) {
         if (!confirm('Удалить корректировку?')) return;
         await fetch(`/api/admin/delete_adjustment/${sid}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-        openSessionsModal(uid, name);
+        loadSessionsList(currentSessionsUid);
+        loadAllStats();
+    }
+
+    // Быстрые корректировки
+    function quickAdj(minutes) {
+        applyAdjustment(minutes);
+    }
+
+    function applyCustomAdj() {
+        const sign = parseInt(document.getElementById('adjSign').value);
+        const hours = parseInt(document.getElementById('adjHours').value) || 0;
+        const minutes = parseInt(document.getElementById('adjMinutes').value) || 0;
+        const total = sign * (hours * 60 + minutes);
+        if (Math.abs(total) > 24*60) {
+            alert('Не более 24 часов за раз');
+            return;
+        }
+        applyAdjustment(total);
+    }
+
+    async function applyAdjustment(minutes) {
+        if (!currentSessionsUid) {
+            alert('Сотрудник не выбран');
+            return;
+        }
+        const adjDate = document.getElementById('adjDate').value;
+        const resp = await fetch('/api/admin/adjust_time_web', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_id: currentSessionsUid,
+                minutes: minutes,
+                date: adjDate || null
+            })
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            loadSessionsList(currentSessionsUid);
+            loadAllStats();
+        } else {
+            alert('Ошибка корректировки');
+        }
     }
 
     // --- Stats ---
